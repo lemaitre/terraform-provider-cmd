@@ -5,7 +5,6 @@ import (
   "strings"
   "sort"
   "fmt"
-  "os/exec"
 
   "github.com/hashicorp/terraform-plugin-framework/diag"
   "github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -117,7 +116,14 @@ func (t cmdLocalType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk
 
   return cmdLocal{
     provider: provider,
+    shell: shell_local{},
   }, diags
+}
+
+// cmdLocal is a resource handle to a cmd_local resource.
+type cmdLocal struct {
+  provider provider
+  shell shell
 }
 
 // cmdLocalData encodes the data of a cmd_local resource.
@@ -141,11 +147,6 @@ type cmdLocalData struct {
   } `tfsdk:"destroy"`
 }
 
-// cmdLocal is a resource handle to a cmd_local resource.
-type cmdLocal struct {
-  provider provider
-}
-
 // Create is in charge to crete a cmd_local resource.
 func (r cmdLocal) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
   var data cmdLocalData
@@ -162,35 +163,32 @@ func (r cmdLocal) Create(ctx context.Context, req tfsdk.CreateResourceRequest, r
   }
 
   for _, create := range data.Create {
-    cmd_line := create.Cmd
-    cmd := exec.Command("sh", "-c", cmd_line)
-
+    cmd := create.Cmd
+    env := make(map[string]string)
     for k, v := range data.Input {
       var s string
       if !v.Null {
         s = v.Value
       }
-      if !v.Null {
-        cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s", k, s))
-      }
+      env[fmt.Sprintf("INPUT_%s", k)] = s
     }
-    stdout, stderr, err := capture_all(cmd)
+    stdout, stderr, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd_line)
+      tflog.Warn(ctx, stderr, "cmd", cmd)
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd_line)
+      tflog.Info(ctx, stdout, "cmd", cmd)
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd_line, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
       return
     }
   }
 
   data.State = make(map[string]string)
-  data.read_state(ctx, true)
+  data.read_state(ctx, r.shell, true)
 
   // For the purposes of this example code, hardcoding a response value to
   // save into the Terraform state.
@@ -211,7 +209,7 @@ func (r cmdLocal) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp 
     return
   }
 
-  data.read_state(ctx, true)
+  data.read_state(ctx, r.shell, true)
 
   diags = resp.State.Set(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -237,45 +235,41 @@ func (r cmdLocal) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, r
     return
   }
 
-  cmd_line := get_update_cmd(state.Input, plan.Input, state)
+  cmd := get_update_cmd(state.Input, plan.Input, state)
 
-  if len(cmd_line) > 0 {
-    cmd := exec.Command("sh", "-c", cmd_line)
+  if len(cmd) > 0 {
+    env := make(map[string]string)
 
     for k, v := range plan.Input {
       var s string
       if !v.Null {
         s = v.Value
       }
-      if !v.Null {
-        cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s", k, s))
-      }
+      env[fmt.Sprintf("INPUT_%s", k)] = s
     }
     for k, v := range state.Input {
       var s string
       if !v.Null {
         s = v.Value
       }
-      if !v.Null {
-        cmd.Env = append(cmd.Env, fmt.Sprintf("PREVIOUS_%s=%s", k, s))
-      }
+      env[fmt.Sprintf("PREVIOUS_%s", k)] = s
     }
-    stdout, stderr, err := capture_all(cmd)
+    stdout, stderr, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd_line)
+      tflog.Warn(ctx, stderr, "cmd", cmd)
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd_line)
+      tflog.Info(ctx, stdout, "cmd", cmd)
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd_line, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
       return
     }
   }
 
-  plan.read_state(ctx, true)
+  plan.read_state(ctx, r.shell, true)
 
   diags = resp.State.Set(ctx, &plan)
   resp.Diagnostics.Append(diags...)
@@ -293,29 +287,26 @@ func (r cmdLocal) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, r
   }
 
   for _, destroy := range data.Destroy {
-    cmd_line := destroy.Cmd
-    cmd := exec.Command("sh", "-c", cmd_line)
-
+    cmd := destroy.Cmd
+    env := make(map[string]string)
     for k, v := range data.Input {
       var s string
       if !v.Null {
         s = v.Value
       }
-      if !v.Null {
-        cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s", k, s))
-      }
+      env[fmt.Sprintf("INPUT_%s", k)] = s
     }
-    stdout, stderr, err := capture_all(cmd)
+    stdout, stderr, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd_line)
+      tflog.Warn(ctx, stderr, "cmd", cmd)
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd_line)
+      tflog.Info(ctx, stdout, "cmd", cmd)
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd_line, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
       return
     }
   }
@@ -328,31 +319,24 @@ func (r cmdLocal) ImportState(ctx context.Context, req tfsdk.ImportResourceState
   tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
 }
 
-func (data *cmdLocalData) read_state(ctx context.Context, state_only bool) []error {
+func (data *cmdLocalData) read_state(ctx context.Context, shell shell, state_only bool) []error {
   var errors []error
-  var env []string
+  env := make(map[string]string)
   for k, v := range data.Input {
     var s string
     if !v.Null {
       s = v.Value
     }
-    if !v.Null {
-      env = append(env, fmt.Sprintf("INPUT_%s=%s", k, s))
-    }
+    env[fmt.Sprintf("INPUT_%s", k)] = s
   }
 
   for _, reload := range data.Reload {
     name := reload.Name
-    cmd_line := reload.Cmd
-    cmd := exec.Command("sh", "-c", cmd_line)
-    cmd.Env = env
-    stdout, stderr, err := capture_all(cmd)
+    cmd := reload.Cmd
+    stdout, stderr, err := shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd_line)
-    }
-    if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd_line)
+      tflog.Warn(ctx, stderr, "cmd", cmd)
     }
     if err == nil {
       if _, found := data.Input[name]; !state_only && found {
