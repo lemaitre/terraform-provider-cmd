@@ -203,22 +203,18 @@ func (r cmdLocal) Create(ctx context.Context, req tfsdk.CreateResourceRequest, r
 // Read is in charge to read the state of a cmd_local resource during a refresh.
 func (r cmdLocal) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
   var data cmdLocalData
-  tflog.Warn(ctx, "Read: start")
 
   diags := req.State.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
 
   if resp.Diagnostics.HasError() {
-    tflog.Warn(ctx, "Read: error")
     return
   }
 
   data.read_state(ctx, true)
 
-  tflog.Warn(ctx, "Read: set")
   diags = resp.State.Set(ctx, &data)
   resp.Diagnostics.Append(diags...)
-  tflog.Warn(ctx, "Read: finished")
 }
 
 // Read is in charge to update a cmd_local resource.
@@ -227,7 +223,6 @@ func (r cmdLocal) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, r
 
   diags := req.State.Get(ctx, &plan)
   diags = req.Config.Get(ctx, &plan)
-  diags = req.Plan.Get(ctx, &plan)
   //resp.Diagnostics.Append(diags...)
   diags = req.State.Get(ctx, &state)
   //resp.Diagnostics.Append(diags...)
