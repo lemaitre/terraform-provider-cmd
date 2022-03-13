@@ -2,6 +2,8 @@ package provider
 
 import (
   "strings"
+  "encoding/base64"
+  "math/rand"
 )
 
 func sorted_list_3way(a []string, b []string) (left, inner, right []string) {
@@ -36,4 +38,10 @@ func sorted_list_3way(a []string, b []string) (left, inner, right []string) {
   }
 
   return
+}
+
+func generate_id() string {
+  var bytes [12]byte
+  rand.Read(bytes[:])
+  return base64.StdEncoding.EncodeToString(bytes[:])
 }
