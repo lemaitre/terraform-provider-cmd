@@ -17,26 +17,34 @@ resource "null_resource" "dummy" {
 resource "cmd_local" "pouet" {
   inputs = {
     a = 2
-    b = 1
+    b = 3
     c = null_resource.dummy.id
   }
   create {
-    cmd = "echo Created"
+    cmd = "export"
   }
   destroy {
-    cmd = "echo Destroyed >&2"
+    cmd = "export"
   }
 
   update {
-    triggers = ["a"]
-    cmd = "env"
+    triggers = ["a", "b"]
+    cmd = "export"
   }
   update {
-    triggers = ["a", "b"]
-    cmd = "env"
+    triggers = ["b", "c"]
+    cmd = "export"
+  }
+  
+  reload {
+    name = "a"
+    cmd = "echo -n $INPUT_a"
   }
 }
 
 output "pouet" {
-  value = cmd_local.pouet
+  value = {
+    inputs = cmd_local.pouet.inputs
+    state = cmd_local.pouet.state
+  }
 }

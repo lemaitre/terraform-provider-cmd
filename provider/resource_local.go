@@ -5,6 +5,7 @@ import (
   "strings"
   "sort"
   "fmt"
+  "os/exec"
 
   "github.com/hashicorp/terraform-plugin-framework/diag"
   "github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -33,9 +34,9 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
       "state": {
         Computed:            true,
         MarkdownDescription: "State",
-        PlanModifiers: tfsdk.AttributePlanModifiers{
-          tfsdk.UseStateForUnknown(),
-        },
+        //PlanModifiers: tfsdk.AttributePlanModifiers{
+        //  tfsdk.UseStateForUnknown(),
+        //},
         Type: types.MapType{types.StringType},
       },
       "id": {
@@ -50,12 +51,12 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
 
     Blocks: map[string]tfsdk.Block{
       "update": {
-        NestingMode: tfsdk.BlockNestingModeList,
+        NestingMode: tfsdk.BlockNestingModeSet,
         Attributes: map[string]tfsdk.Attribute{
           "triggers": {
             MarkdownDescription: "What variable changes trigger the update",
             Optional:            true,
-            Type:                types.SetType{types.StringType},
+            Type:                types.ListType{types.StringType},
           },
           "cmd": {
             MarkdownDescription: "Command to execute",
@@ -63,9 +64,12 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
             Type:                types.StringType,
           },
         },
+        Validators: []tfsdk.AttributeValidator{
+          updateValidator{},
+        },
       },
       "reload": {
-        NestingMode: tfsdk.BlockNestingModeList,
+        NestingMode: tfsdk.BlockNestingModeSet,
         Attributes: map[string]tfsdk.Attribute{
           "name": {
             MarkdownDescription: "Variable name to reload",
@@ -80,7 +84,7 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
         },
       },
       "create": {
-        NestingMode: tfsdk.BlockNestingModeList,
+        NestingMode: tfsdk.BlockNestingModeSet,
         MinItems: 0,
         MaxItems: 1,
         Attributes: map[string]tfsdk.Attribute{
@@ -92,7 +96,7 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
         },
       },
       "destroy": {
-        NestingMode: tfsdk.BlockNestingModeList,
+        NestingMode: tfsdk.BlockNestingModeSet,
         MinItems: 0,
         MaxItems: 1,
         Attributes: map[string]tfsdk.Attribute{
@@ -153,53 +157,40 @@ func (r cmdLocal) Create(ctx context.Context, req tfsdk.CreateResourceRequest, r
     return
   }
 
-  type void struct {}
-  seen := make(map[string]void)
-  conflict := make(map[string]void)
-
-  for _, update0 := range data.Update {
-    triggers0 := strings.Join(update0.Triggers, ",")
-    if _, found := seen[triggers0]; found {
-      resp.Diagnostics.AddError("Update ambiguity", fmt.Sprintf("Update rule for %s is duplicated", triggers0))
-    }
-    seen[triggers0] = void{}
-
-    for _, update1 := range data.Update {
-      left, inner, right := sorted_list_3way(update0.Triggers, update1.Triggers)
-      if len(left) > 0 && len(inner) > 0 && len(right) > 0 {
-        conflict[strings.Join(inner, ",")] = void{}
-      }
-    }
-  }
-
-  for k := range conflict {
-    if _, found := seen[k]; !found {
-      resp.Diagnostics.AddError("Update Ambiguity", fmt.Sprintf("Update of %s would lead to ambiguous update rule", k))
-    }
-  }
-
   if resp.Diagnostics.HasError() {
     return
   }
 
   for _, create := range data.Create {
-    cmd := create.Cmd
-    stdout, stderr, err := execute("sh", "-c", cmd)
+    cmd_line := create.Cmd
+    cmd := exec.Command("sh", "-c", cmd_line)
+
+    for k, v := range data.Input {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      if !v.Null {
+        cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s", k, s))
+      }
+    }
+    stdout, stderr, err := capture_all(cmd)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, "cmd", cmd_line)
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd)
+      tflog.Info(ctx, stdout, "cmd", cmd_line)
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd_line, err, stderr))
       return
     }
   }
 
-  data.State = map[string]string{}
+  data.State = make(map[string]string)
+  data.read_state(ctx, true)
 
   // For the purposes of this example code, hardcoding a response value to
   // save into the Terraform state.
@@ -222,13 +213,7 @@ func (r cmdLocal) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp 
     return
   }
 
-  // If applicable, this is a great opportunity to initialize any necessary
-  // provider client data and make a call using it.
-  // example, err := d.provider.client.ReadExample(...)
-  // if err != nil {
-  //     resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read example, got error: %s", err))
-  //     return
-  // }
+  data.read_state(ctx, true)
 
   tflog.Warn(ctx, "Read: set")
   diags = resp.State.Set(ctx, &data)
@@ -240,32 +225,62 @@ func (r cmdLocal) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp 
 func (r cmdLocal) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
   var plan, state cmdLocalData
 
-  diags := req.Plan.Get(ctx, &plan)
-  resp.Diagnostics.Append(diags...)
+  diags := req.State.Get(ctx, &plan)
+  diags = req.Config.Get(ctx, &plan)
+  diags = req.Plan.Get(ctx, &plan)
+  //resp.Diagnostics.Append(diags...)
   diags = req.State.Get(ctx, &state)
-  resp.Diagnostics.Append(diags...)
+  //resp.Diagnostics.Append(diags...)
+
+  plan.Id = state.Id
+
+  if plan.State == nil {
+    plan.State = make(map[string]string)
+  }
 
   if resp.Diagnostics.HasError() {
     return
   }
 
-  cmd := get_update_cmd(state.Input, plan.Input, state)
+  cmd_line := get_update_cmd(state.Input, plan.Input, state)
 
-  if len(cmd) > 0 {
-    stdout, stderr, err := execute("sh", "-c", cmd)
+  if len(cmd_line) > 0 {
+    cmd := exec.Command("sh", "-c", cmd_line)
+
+    for k, v := range plan.Input {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      if !v.Null {
+        cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s", k, s))
+      }
+    }
+    for k, v := range state.Input {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      if !v.Null {
+        cmd.Env = append(cmd.Env, fmt.Sprintf("PREVIOUS_%s=%s", k, s))
+      }
+    }
+    stdout, stderr, err := capture_all(cmd)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, "cmd", cmd_line)
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd)
+      tflog.Info(ctx, stdout, "cmd", cmd_line)
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd_line, err, stderr))
       return
     }
   }
+
+  plan.read_state(ctx, true)
 
   diags = resp.State.Set(ctx, &plan)
   resp.Diagnostics.Append(diags...)
@@ -282,19 +297,30 @@ func (r cmdLocal) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, r
     return
   }
 
-  for _, create := range data.Destroy {
-    cmd := create.Cmd
-    stdout, stderr, err := execute("sh", "-c", cmd)
+  for _, destroy := range data.Destroy {
+    cmd_line := destroy.Cmd
+    cmd := exec.Command("sh", "-c", cmd_line)
+
+    for k, v := range data.Input {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      if !v.Null {
+        cmd.Env = append(cmd.Env, fmt.Sprintf("INPUT_%s=%s", k, s))
+      }
+    }
+    stdout, stderr, err := capture_all(cmd)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, "cmd", cmd_line)
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd)
+      tflog.Info(ctx, stdout, "cmd", cmd_line)
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd_line, err, stderr))
       return
     }
   }
@@ -305,6 +331,45 @@ func (r cmdLocal) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, r
 // ImportState is in charge to import a cmd_local resource into terraform.
 func (r cmdLocal) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
   tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
+}
+
+func (data *cmdLocalData) read_state(ctx context.Context, state_only bool) []error {
+  var errors []error
+  var env []string
+  for k, v := range data.Input {
+    var s string
+    if !v.Null {
+      s = v.Value
+    }
+    if !v.Null {
+      env = append(env, fmt.Sprintf("INPUT_%s=%s", k, s))
+    }
+  }
+
+  for _, reload := range data.Reload {
+    name := reload.Name
+    cmd_line := reload.Cmd
+    cmd := exec.Command("sh", "-c", cmd_line)
+    cmd.Env = env
+    stdout, stderr, err := capture_all(cmd)
+
+    if len(stderr) > 0 {
+      tflog.Warn(ctx, stderr, "cmd", cmd_line)
+    }
+    if len(stdout) > 0 {
+      tflog.Info(ctx, stdout, "cmd", cmd_line)
+    }
+    if err == nil {
+      if _, found := data.Input[name]; !state_only && found {
+        data.Input[name] = types.String{Value: stdout}
+      }
+      data.State[name] = stdout
+    } else {
+      errors = append(errors, err)
+    }
+  }
+
+  return errors
 }
 
 // get_update_cmd search for the right command to execute satisfying the update policies of the resource.
@@ -327,6 +392,7 @@ func get_update_cmd(state map[string]types.String, plan map[string]types.String,
 
   for _, update := range rules.Update {
     triggers := update.Triggers
+    sort.Strings(triggers)
     if len(triggers) == 0 {
       if len(cmd) == 0 {
         cmd = update.Cmd
@@ -375,4 +441,44 @@ func (_ planModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanR
   }
 }
 
+type updateValidator struct {}
 
+func (_ updateValidator) Description(ctx context.Context) string {
+  return "Validates the update policy"
+}
+func (_ updateValidator) MarkdownDescription(ctx context.Context) string {
+  return "Validates the update policy"
+}
+func (_ updateValidator) Validate(ctx context.Context, req tfsdk.ValidateAttributeRequest, resp *tfsdk.ValidateAttributeResponse) {
+  var data cmdLocalData
+
+  diags := req.Config.Get(ctx, &data)
+  resp.Diagnostics.Append(diags...)
+
+  type void struct {}
+  seen := make(map[string]void)
+  conflict := make(map[string]void)
+
+  for _, update0 := range data.Update {
+    sort.Strings(update0.Triggers)
+    triggers0 := strings.Join(update0.Triggers, ",")
+    if _, found := seen[triggers0]; found {
+      resp.Diagnostics.AddError("Update ambiguity", fmt.Sprintf("Update rule for %s is duplicated", triggers0))
+    }
+    seen[triggers0] = void{}
+
+    for _, update1 := range data.Update {
+      sort.Strings(update1.Triggers)
+      left, inner, right := sorted_list_3way(update0.Triggers, update1.Triggers)
+      if len(left) > 0 && len(inner) > 0 && len(right) > 0 {
+        conflict[strings.Join(inner, ",")] = void{}
+      }
+    }
+  }
+
+  for k := range conflict {
+    if _, found := seen[k]; !found {
+      resp.Diagnostics.AddError("Update Ambiguity", fmt.Sprintf("Update of %s would lead to ambiguous update rule", k))
+    }
+  }
+}
