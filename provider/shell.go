@@ -42,3 +42,7 @@ func (sh shell_local) Execute(command string, env map[string]string) (stdout str
   return
 }
 func (_ shell_local) Destroy() {}
+
+func shell_local_factory(map[string]string) shell {
+  return shell_local{}
+}

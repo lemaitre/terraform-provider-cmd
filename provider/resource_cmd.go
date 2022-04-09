@@ -13,7 +13,9 @@ import (
   "github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-type resourceCmdType struct{}
+type resourceCmdType struct{
+  shellFactory func(map[string]string) shell
+}
 
 // GetSchema returns the Terraform Schema of the cmd_local resource.
 func (t resourceCmdType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
@@ -119,9 +121,10 @@ func (t resourceCmdType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diag
 func (t resourceCmdType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
   provider, diags := convertProviderType(in)
 
-  return resourceCmd{
+  return &resourceCmd{
     provider: provider,
-    shell: shell_local{},
+    shell: nil,
+    shellFactory: t.shellFactory,
   }, diags
 }
 
@@ -129,6 +132,7 @@ func (t resourceCmdType) NewResource(ctx context.Context, in tfsdk.Provider) (tf
 type resourceCmd struct {
   provider provider
   shell shell
+  shellFactory func(map[string]string) shell
 }
 
 // resourceCmdData encodes the data of a cmd_local resource.
@@ -153,8 +157,15 @@ type resourceCmdData struct {
   } `tfsdk:"destroy"`
 }
 
+func (r *resourceCmd) init(ctx context.Context, data resourceCmdData) {
+  if r.shellFactory != nil {
+    r.shell = r.shellFactory(data.ConnectionOptions)
+    r.shellFactory = nil
+  }
+}
+
 // Create is in charge to crete a cmd_local resource.
-func (r resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
+func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
   var data resourceCmdData
 
   diags := req.Config.Get(ctx, &data)
@@ -167,6 +178,8 @@ func (r resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceRequest
   if resp.Diagnostics.HasError() {
     return
   }
+
+  r.init(ctx, data)
 
   for _, create := range data.Create {
     cmd := create.Cmd
@@ -205,7 +218,7 @@ func (r resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceRequest
 }
 
 // Read is in charge to read the state of a cmd_local resource during a refresh.
-func (r resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
+func (r *resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
   var data resourceCmdData
 
   diags := req.State.Get(ctx, &data)
@@ -215,6 +228,8 @@ func (r resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, re
     return
   }
 
+  r.init(ctx, data)
+
   data.read_state(ctx, r.shell, true)
 
   diags = resp.State.Set(ctx, &data)
@@ -222,7 +237,7 @@ func (r resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, re
 }
 
 // Read is in charge to update a cmd_local resource.
-func (r resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
+func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
   var plan, state resourceCmdData
 
   diags := req.State.Get(ctx, &plan)
@@ -240,6 +255,8 @@ func (r resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceRequest
   if resp.Diagnostics.HasError() {
     return
   }
+
+  r.init(ctx, plan)
 
   cmd := get_update_cmd(state.Input, plan.Input, state)
 
@@ -282,7 +299,7 @@ func (r resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceRequest
 }
 
 // Read is in charge to delete a cmd_local resource.
-func (r resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
+func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
   var data resourceCmdData
 
   diags := req.State.Get(ctx, &data)
@@ -291,6 +308,8 @@ func (r resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest
   if resp.Diagnostics.HasError() {
     return
   }
+
+  r.init(ctx, data)
 
   for _, destroy := range data.Destroy {
     cmd := destroy.Cmd
@@ -321,7 +340,7 @@ func (r resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest
 }
 
 // ImportState is in charge to import a cmd_local resource into terraform.
-func (r resourceCmd) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
+func (r *resourceCmd) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
   tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
 }
 
