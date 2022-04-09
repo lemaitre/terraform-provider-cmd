@@ -22,6 +22,11 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
     MarkdownDescription: "Custom resource managed by local shell scripts",
 
     Attributes: map[string]tfsdk.Attribute{
+      "connection": {
+        Optional:            true,
+        MarkdownDescription: "Connection Options",
+        Type: types.MapType{types.StringType},
+      },
       "inputs": {
         Required:            true,
         MarkdownDescription: "Inputs",
@@ -131,6 +136,7 @@ type cmdLocalData struct {
   Id   types.String `tfsdk:"id"`
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]string `tfsdk:"state"`
+  ConnectionOptions map[string]string `tfsdk:"connection"`
   Reload []struct {
     Name string `tfsdk:"name"`
     Cmd string `tfsdk:"cmd"`

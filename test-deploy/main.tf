@@ -2,7 +2,7 @@ terraform {
   required_providers {
     cmd = {
       source  = "lemaitre.re/lemaitre/cmd"
-      version = "~> 0.1"
+      version = "~> 0.1.0"
     }
   }
 }
@@ -16,8 +16,8 @@ resource "null_resource" "dummy" {
 
 resource "cmd_local" "pouet" {
   inputs = {
-    a = 2
-    b = 3
+    a = 3
+    b = 4
     c = null_resource.dummy.id
   }
   create {
@@ -27,6 +27,10 @@ resource "cmd_local" "pouet" {
     cmd = "export"
   }
 
+  update {
+    triggers = ["b"]
+    cmd = "export"
+  }
   update {
     triggers = ["a", "b"]
     cmd = "export"
