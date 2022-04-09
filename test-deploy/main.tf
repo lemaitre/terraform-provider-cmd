@@ -8,9 +8,6 @@ terraform {
 }
 
 
-provider "cmd" {
-}
-
 resource "null_resource" "dummy" {
 }
 
@@ -44,6 +41,10 @@ resource "cmd_local" "pouet" {
     name = "a"
     cmd = "echo -n $INPUT_a"
   }
+}
+
+resource "cmd_ssh" "plop" {
+  inputs = {}
 }
 
 output "pouet" {

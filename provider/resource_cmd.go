@@ -13,10 +13,10 @@ import (
   "github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-type cmdLocalType struct{}
+type resourceCmdType struct{}
 
 // GetSchema returns the Terraform Schema of the cmd_local resource.
-func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
+func (t resourceCmdType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
   return tfsdk.Schema{
     Description: "Custom resource managed by local shell scripts",
     MarkdownDescription: "Custom resource managed by local shell scripts",
@@ -116,23 +116,23 @@ func (t cmdLocalType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
 }
 
 // NewResource creates a resource handle to a cmd_local resource.
-func (t cmdLocalType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
+func (t resourceCmdType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
   provider, diags := convertProviderType(in)
 
-  return cmdLocal{
+  return resourceCmd{
     provider: provider,
     shell: shell_local{},
   }, diags
 }
 
-// cmdLocal is a resource handle to a cmd_local resource.
-type cmdLocal struct {
+// resourceCmd is a resource handle to a cmd_local resource.
+type resourceCmd struct {
   provider provider
   shell shell
 }
 
-// cmdLocalData encodes the data of a cmd_local resource.
-type cmdLocalData struct {
+// resourceCmdData encodes the data of a cmd_local resource.
+type resourceCmdData struct {
   Id   types.String `tfsdk:"id"`
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]string `tfsdk:"state"`
@@ -154,8 +154,8 @@ type cmdLocalData struct {
 }
 
 // Create is in charge to crete a cmd_local resource.
-func (r cmdLocal) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
-  var data cmdLocalData
+func (r resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
+  var data resourceCmdData
 
   diags := req.Config.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -205,8 +205,8 @@ func (r cmdLocal) Create(ctx context.Context, req tfsdk.CreateResourceRequest, r
 }
 
 // Read is in charge to read the state of a cmd_local resource during a refresh.
-func (r cmdLocal) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
-  var data cmdLocalData
+func (r resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
+  var data resourceCmdData
 
   diags := req.State.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -222,8 +222,8 @@ func (r cmdLocal) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp 
 }
 
 // Read is in charge to update a cmd_local resource.
-func (r cmdLocal) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
-  var plan, state cmdLocalData
+func (r resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
+  var plan, state resourceCmdData
 
   diags := req.State.Get(ctx, &plan)
   diags = req.Config.Get(ctx, &plan)
@@ -282,8 +282,8 @@ func (r cmdLocal) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, r
 }
 
 // Read is in charge to delete a cmd_local resource.
-func (r cmdLocal) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
-  var data cmdLocalData
+func (r resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
+  var data resourceCmdData
 
   diags := req.State.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -321,11 +321,11 @@ func (r cmdLocal) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, r
 }
 
 // ImportState is in charge to import a cmd_local resource into terraform.
-func (r cmdLocal) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
+func (r resourceCmd) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
   tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
 }
 
-func (data *cmdLocalData) read_state(ctx context.Context, shell shell, state_only bool) []error {
+func (data *resourceCmdData) read_state(ctx context.Context, shell shell, state_only bool) []error {
   var errors []error
   env := make(map[string]string)
   for k, v := range data.Input {
@@ -358,7 +358,7 @@ func (data *cmdLocalData) read_state(ctx context.Context, shell shell, state_onl
 }
 
 // get_update_cmd search for the right command to execute satisfying the update policies of the resource.
-func get_update_cmd(state map[string]types.String, plan map[string]types.String, rules cmdLocalData) string {
+func get_update_cmd(state map[string]types.String, plan map[string]types.String, rules resourceCmdData) string {
   var modified []string
   for k, x := range state {
     if y, found := plan[k]; !found || x != y {
@@ -405,7 +405,7 @@ func (_ planModifier) MarkdownDescription(ctx context.Context) string {
 }
 
 func (_ planModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
-  var plan, state cmdLocalData
+  var plan, state resourceCmdData
 
   if req.State.Raw.IsNull() || !req.State.Raw.IsKnown() {
     return
@@ -435,7 +435,7 @@ func (_ updateValidator) MarkdownDescription(ctx context.Context) string {
   return "Validates the update policy"
 }
 func (_ updateValidator) Validate(ctx context.Context, req tfsdk.ValidateAttributeRequest, resp *tfsdk.ValidateAttributeResponse) {
-  var data cmdLocalData
+  var data resourceCmdData
 
   diags := req.Config.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
