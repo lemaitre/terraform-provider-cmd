@@ -14,7 +14,7 @@ import (
 )
 
 type resourceCmdType struct{
-  shellFactory func(map[string]string) shell
+  shellFactory func(map[string]string) (shell, error)
 }
 
 // GetSchema returns the Terraform Schema of the cmd_local resource.
@@ -132,7 +132,7 @@ func (t resourceCmdType) NewResource(ctx context.Context, in tfsdk.Provider) (tf
 type resourceCmd struct {
   provider provider
   shell shell
-  shellFactory func(map[string]string) shell
+  shellFactory func(map[string]string) (shell, error)
 }
 
 // resourceCmdData encodes the data of a cmd_local resource.
@@ -157,11 +157,15 @@ type resourceCmdData struct {
   } `tfsdk:"destroy"`
 }
 
-func (r *resourceCmd) init(ctx context.Context, data resourceCmdData) {
-  if r.shellFactory != nil {
-    r.shell = r.shellFactory(data.ConnectionOptions)
-    r.shellFactory = nil
+func (r *resourceCmd) init(ctx context.Context, data resourceCmdData) error {
+  if r.shell == nil {
+    var err error
+    r.shell, err = r.shellFactory(data.ConnectionOptions)
+    if err != nil {
+      return err
+    }
   }
+  return nil
 }
 
 // Create is in charge to crete a cmd_local resource.
@@ -179,7 +183,10 @@ func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceReques
     return
   }
 
-  r.init(ctx, data)
+  if err := r.init(ctx, data); err != nil {
+    resp.Diagnostics.AddError("Connection Error", err.Error())
+    return
+  }
 
   for _, create := range data.Create {
     cmd := create.Cmd
@@ -228,7 +235,10 @@ func (r *resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, r
     return
   }
 
-  r.init(ctx, data)
+  if err := r.init(ctx, data); err != nil {
+    resp.Diagnostics.AddError("Connection Error", err.Error())
+    return
+  }
 
   data.read_state(ctx, r.shell, true)
 
@@ -256,7 +266,10 @@ func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceReques
     return
   }
 
-  r.init(ctx, plan)
+  if err := r.init(ctx, plan); err != nil {
+    resp.Diagnostics.AddError("Connection Error", err.Error())
+    return
+  }
 
   cmd := get_update_cmd(state.Input, plan.Input, state)
 
@@ -309,7 +322,10 @@ func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceReques
     return
   }
 
-  r.init(ctx, data)
+  if err := r.init(ctx, data); err != nil {
+    resp.Diagnostics.AddError("Connection Error", err.Error())
+    return
+  }
 
   for _, destroy := range data.Destroy {
     cmd := destroy.Cmd

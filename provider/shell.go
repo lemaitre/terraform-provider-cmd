@@ -10,7 +10,7 @@ type shell interface {
   Execute(string, map[string]string) (string, string, error)
   //Send(string, []byte) error
   //Receive(string) ([]byte, error)
-  Destroy()
+  Close()
 }
 
 type shell_local struct {
@@ -41,8 +41,8 @@ func (sh shell_local) Execute(command string, env map[string]string) (stdout str
 
   return
 }
-func (_ shell_local) Destroy() {}
+func (_ shell_local) Close() {}
 
-func shell_local_factory(map[string]string) shell {
-  return shell_local{}
+func shell_local_factory(map[string]string) (shell, error) {
+  return shell_local{}, nil
 }
