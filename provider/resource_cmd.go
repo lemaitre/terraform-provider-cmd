@@ -140,7 +140,7 @@ type resourceCmdData struct {
   Id   types.String `tfsdk:"id"`
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]string `tfsdk:"state"`
-  ConnectionOptions map[string]string `tfsdk:"connection"`
+  ConnectionOptions map[string]types.String `tfsdk:"connection"`
   Reload []struct {
     Name string `tfsdk:"name"`
     Cmd string `tfsdk:"cmd"`
@@ -159,8 +159,15 @@ type resourceCmdData struct {
 
 func (r *resourceCmd) init(ctx context.Context, data resourceCmdData) error {
   if r.shell == nil {
+    options := make(map[string]string)
+    for k, v := range data.ConnectionOptions {
+      if v.Null {
+        return fmt.Errorf("%s is not known or null", k)
+      }
+      options[k] = v.Value
+    }
     var err error
-    r.shell, err = r.shellFactory(data.ConnectionOptions)
+    r.shell, err = r.shellFactory(options)
     if err != nil {
       return err
     }
