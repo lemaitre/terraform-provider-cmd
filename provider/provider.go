@@ -55,8 +55,8 @@ func (p *provider) Configure(ctx context.Context, req tfsdk.ConfigureProviderReq
 
 func (p *provider) GetResources(ctx context.Context) (map[string]tfsdk.ResourceType, diag.Diagnostics) {
 	return map[string]tfsdk.ResourceType{
-    "cmd_local": resourceCmdType{ shellFactory: shell_local_factory, },
-    "cmd_ssh": resourceCmdType{ shellFactory: shell_ssh_factory, },
+    "cmd_local": resourceCmdType{ shellFactory: shellLocalFactory, },
+    "cmd_ssh": resourceCmdType{ shellFactory: shellSshFactory, },
 	}, nil
 }
 

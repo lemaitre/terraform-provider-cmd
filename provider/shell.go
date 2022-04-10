@@ -13,11 +13,11 @@ type shell interface {
   Close()
 }
 
-type shell_local struct {
+type shellLocal struct {
   args []string
 }
 
-func (sh shell_local) Execute(command string, env map[string]string) (stdout string, stderr string, err error) {
+func (sh shellLocal) Execute(command string, env map[string]string) (stdout string, stderr string, err error) {
   if len(sh.args) == 0 {
     sh.args = []string{"sh", "-c", command}
   } else {
@@ -41,8 +41,8 @@ func (sh shell_local) Execute(command string, env map[string]string) (stdout str
 
   return
 }
-func (_ shell_local) Close() {}
+func (_ shellLocal) Close() {}
 
-func shell_local_factory(map[string]string) (shell, error) {
-  return shell_local{}, nil
+func shellLocalFactory(map[string]string) (shell, error) {
+  return shellLocal{}, nil
 }
