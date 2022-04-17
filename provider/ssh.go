@@ -26,14 +26,17 @@ func (sh *shellSsh) Execute(command string, env map[string]string) (string, stri
   session.Stdout = &stdout
   session.Stderr = &stderr
 
+  cmd := "set +v\n"
   for k, v := range env {
-    session.Setenv(k, v)
-    if err != nil {
-      return "", "", err
-    }
+    cmd += fmt.Sprintf("IFS= read -r -d '' %s << '__!@#$END_OF_VARIABLE$#@!__' || true\n%s\n__!@#$END_OF_VARIABLE$#@!__\nexport %s=\"${%s%%?}\"\n", k, v, k, k)
+    //session.Setenv(k, v)
+    //if err != nil {
+    //  return "", "", err
+    //}
   }
+  cmd += command
 
-  err = session.Run(command)
+  err = session.Run(cmd)
   if err != nil {
     return "", "", err
   }
