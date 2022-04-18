@@ -205,7 +205,7 @@ func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceReques
       }
       env[fmt.Sprintf("INPUT_%s", k)] = s
     }
-    stdout, stderr, err := r.shell.Execute(cmd, env)
+    stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
       tflog.Warn(ctx, stderr, "cmd", cmd)
@@ -215,7 +215,7 @@ func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceReques
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, combined))
       return
     }
   }
@@ -297,7 +297,7 @@ func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceReques
       }
       env[fmt.Sprintf("PREVIOUS_%s", k)] = s
     }
-    stdout, stderr, err := r.shell.Execute(cmd, env)
+    stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
       tflog.Warn(ctx, stderr, "cmd", cmd)
@@ -307,7 +307,7 @@ func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceReques
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, combined))
       return
     }
   }
@@ -344,7 +344,7 @@ func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceReques
       }
       env[fmt.Sprintf("INPUT_%s", k)] = s
     }
-    stdout, stderr, err := r.shell.Execute(cmd, env)
+    stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
       tflog.Warn(ctx, stderr, "cmd", cmd)
@@ -354,7 +354,7 @@ func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceReques
     }
 
     if err != nil {
-      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, stderr))
+      resp.Diagnostics.AddError("Command error", fmt.Sprintf("Unable to execute command: %s\n%s\n%s", cmd, err, combined))
       return
     }
   }
@@ -381,7 +381,7 @@ func (data *resourceCmdData) read_state(ctx context.Context, shell shell, state_
   for _, reload := range data.Reload {
     name := reload.Name
     cmd := reload.Cmd
-    stdout, stderr, err := shell.Execute(cmd, env)
+    stdout, stderr, _, err := shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
       tflog.Warn(ctx, stderr, "cmd", cmd)

@@ -1,13 +1,12 @@
 package provider
 
 import (
-  "bytes"
   "fmt"
   "os/exec"
 )
 
 type shell interface {
-  Execute(string, map[string]string) (string, string, error)
+  Execute(string, map[string]string) (string, string, string, error)
   //Send(string, []byte) error
   //Receive(string) ([]byte, error)
   Close()
@@ -17,7 +16,7 @@ type shellLocal struct {
   args []string
 }
 
-func (sh shellLocal) Execute(command string, env map[string]string) (stdout string, stderr string, err error) {
+func (sh shellLocal) Execute(command string, env map[string]string) (string, string, string, error) {
   if len(sh.args) == 0 {
     sh.args = []string{"sh", "-c", command}
   } else {
@@ -30,16 +29,14 @@ func (sh shellLocal) Execute(command string, env map[string]string) (stdout stri
     cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
   }
 
-  var outb, errb bytes.Buffer
-  cmd.Stdout = &outb
-  cmd.Stderr = &errb
+  out := NewCommandOutput()
 
-  err = cmd.Run()
+  cmd.Stdout = out.StdoutWriter
+  cmd.Stderr = out.StderrWriter
 
-  stdout = outb.String()
-  stderr = errb.String()
+  err := cmd.Run()
 
-  return
+  return out.Stdout.String(), out.Stderr.String(), out.Combined.String(), err
 }
 func (_ shellLocal) Close() {}
 

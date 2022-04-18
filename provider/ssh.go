@@ -2,7 +2,6 @@ package provider
 
 import (
   "strconv"
-  "bytes"
   "fmt"
   "encoding/json"
   "encoding/pem"
@@ -16,15 +15,15 @@ type shellSsh struct {
   client *ssh.Client
 }
 
-func (sh *shellSsh) Execute(command string, env map[string]string) (string, string, error) {
-  var stdout, stderr bytes.Buffer
+func (sh *shellSsh) Execute(command string, env map[string]string) (string, string, string, error) {
+  out := NewCommandOutput()
   session, err := sh.client.NewSession()
   if err != nil {
-    return "", "", err
+    return "", "", "", err
   }
   defer session.Close()
-  session.Stdout = &stdout
-  session.Stderr = &stderr
+  session.Stdout = out.StdoutWriter
+  session.Stderr = out.StderrWriter
 
   cmd := "set +v\n"
   for k, v := range env {
@@ -37,11 +36,8 @@ func (sh *shellSsh) Execute(command string, env map[string]string) (string, stri
   cmd += command
 
   err = session.Run(cmd)
-  if err != nil {
-    return "", "", err
-  }
 
-  return stdout.String(), stderr.String(), nil
+  return out.Stdout.String(), out.Stderr.String(), out.Combined.String(), err
 }
 
 func (sh *shellSsh) Close() {
