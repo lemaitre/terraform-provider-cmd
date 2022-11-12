@@ -47,30 +47,28 @@ resource "cmd_ssh" "plop" {
   connection = {
     hostname = "bender.csdt.fr"
     username = "dummy-user"
-    password = "dummy"
+    keyfile = "dummy.rsa"
+    pouet = null_resource.dummy.id
   }
   inputs = {
-    dummy = "e"
+    dummy = md5("b")
   }
 
   create {
-    cmd = "echo create; sleep 10"
+    cmd = "echo create"
   }
   update {
-    cmd = "echo update; sleep 10"
+    cmd = "echo update"
   }
   destroy {
-    cmd = "echo destroy; sleep 10"
+    cmd = "echo destroy"
   }
   reload {
     name = "a"
-    cmd = "echo reload; sleep 10"
+    cmd = "echo reload"
   }
 }
 
-#output "pouet" {
-#  value = {
-#    inputs = cmd_local.pouet.inputs
-#    state = cmd_local.pouet.state
-#  }
-#}
+output "plop" {
+  value = cmd_ssh.plop
+}

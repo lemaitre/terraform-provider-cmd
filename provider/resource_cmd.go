@@ -6,19 +6,54 @@ import (
   "sort"
   "fmt"
 
+  "github.com/hashicorp/terraform-plugin-framework/attr"
+  //"github.com/hashicorp/terraform-plugin-framework/datasource"
   "github.com/hashicorp/terraform-plugin-framework/diag"
+  //"github.com/hashicorp/terraform-plugin-framework/path"
+  //"github.com/hashicorp/terraform-plugin-framework/provider"
+  "github.com/hashicorp/terraform-plugin-framework/resource"
   "github.com/hashicorp/terraform-plugin-framework/tfsdk"
   "github.com/hashicorp/terraform-plugin-framework/types"
-  "github.com/hashicorp/terraform-plugin-go/tftypes"
   "github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-type resourceCmdType struct{
+// Ensure the implementation satisfies the expected interfaces.
+var (
+	_ resource.Resource                = &cmdResource{}
+	_ resource.ResourceWithConfigure   = &cmdResource{}
+	_ resource.ResourceWithImportState = &cmdResource{}
+)
+
+// cmdResource is a resource handle to a cmd_local resource.
+type cmdResource struct {
+  shell shell
+  shellType string
   shellFactory func(map[string]string) (shell, error)
 }
 
+func NewCmdLocalResource() resource.Resource {
+  return &cmdResource{
+    shell: nil,
+    shellType: "local",
+    shellFactory: shellLocalFactory,
+  }
+}
+
+func NewCmdSshResource() resource.Resource {
+  return &cmdResource{
+    shell: nil,
+    shellType: "ssh",
+    shellFactory: shellSshFactory,
+  }
+}
+
+// Metadata returns the data source type name.
+func (r *cmdResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+  resp.TypeName = req.ProviderTypeName + "_" + r.shellType
+}
+
 // GetSchema returns the Terraform Schema of the cmd_local resource.
-func (t resourceCmdType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
+func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
   return tfsdk.Schema{
     Description: "Custom resource managed by local shell scripts",
     MarkdownDescription: "Custom resource managed by local shell scripts",
@@ -40,16 +75,17 @@ func (t resourceCmdType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diag
       "state": {
         Computed:            true,
         MarkdownDescription: "State",
-        //PlanModifiers: tfsdk.AttributePlanModifiers{
-        //  tfsdk.UseStateForUnknown(),
-        //},
+        PlanModifiers: tfsdk.AttributePlanModifiers{
+          planModifier2{},
+          //resource.UseStateForUnknown(),
+        },
         Type: types.MapType{types.StringType},
       },
       "id": {
         Computed:            true,
         MarkdownDescription: "Example identifier",
         PlanModifiers: tfsdk.AttributePlanModifiers{
-          tfsdk.UseStateForUnknown(),
+          resource.UseStateForUnknown(),
         },
         Type: types.StringType,
       },
@@ -117,26 +153,12 @@ func (t resourceCmdType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diag
   }, nil
 }
 
-// NewResource creates a resource handle to a cmd_local resource.
-func (t resourceCmdType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
-  provider, diags := convertProviderType(in)
-
-  return &resourceCmd{
-    provider: provider,
-    shell: nil,
-    shellFactory: t.shellFactory,
-  }, diags
+// Configure adds the provider configured client to the data source.
+func (r *cmdResource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
 }
 
-// resourceCmd is a resource handle to a cmd_local resource.
-type resourceCmd struct {
-  provider provider
-  shell shell
-  shellFactory func(map[string]string) (shell, error)
-}
-
-// resourceCmdData encodes the data of a cmd_local resource.
-type resourceCmdData struct {
+// cmdResourceModel encodes the data of a cmd_local resource.
+type cmdResourceModel struct {
   Id   types.String `tfsdk:"id"`
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]string `tfsdk:"state"`
@@ -157,7 +179,7 @@ type resourceCmdData struct {
   } `tfsdk:"destroy"`
 }
 
-func (r *resourceCmd) init(ctx context.Context, data resourceCmdData) error {
+func (r *cmdResource) init(ctx context.Context, data cmdResourceModel) error {
   if r.shell == nil {
     options := make(map[string]string)
     for k, v := range data.ConnectionOptions {
@@ -176,8 +198,11 @@ func (r *resourceCmd) init(ctx context.Context, data resourceCmdData) error {
 }
 
 // Create is in charge to crete a cmd_local resource.
-func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
-  var data resourceCmdData
+func (r *cmdResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+  var data cmdResourceModel
+
+  tflog.Info(ctx, fmt.Sprintf("##### Create:Config #####\n%s\n##### /Create:Config #####", formatVal(req.Config.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### Create:Plan #####\n%s\n##### /Create:Plan #####", formatVal(req.Plan.Raw)))
 
   diags := req.Config.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -208,10 +233,10 @@ func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceReques
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, map[string]any{"cmd": cmd})
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd)
+      tflog.Info(ctx, stdout, map[string]any{"cmd": cmd})
     }
 
     if err != nil {
@@ -232,8 +257,10 @@ func (r *resourceCmd) Create(ctx context.Context, req tfsdk.CreateResourceReques
 }
 
 // Read is in charge to read the state of a cmd_local resource during a refresh.
-func (r *resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
-  var data resourceCmdData
+func (r *cmdResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+  var data cmdResourceModel
+
+  tflog.Info(ctx, fmt.Sprintf("##### Read:State #####\n%s\n##### /Read:State #####", formatVal(req.State.Raw)))
 
   diags := req.State.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -254,8 +281,12 @@ func (r *resourceCmd) Read(ctx context.Context, req tfsdk.ReadResourceRequest, r
 }
 
 // Read is in charge to update a cmd_local resource.
-func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
-  var plan, state resourceCmdData
+func (r *cmdResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+  var plan, state cmdResourceModel
+
+  tflog.Info(ctx, fmt.Sprintf("##### Update:Config #####\n%s\n##### /Update:Config #####", formatVal(req.Config.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### Update:State #####\n%s\n##### /Update:State #####", formatVal(req.State.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### Update:Plan #####\n%s\n##### /Update:Plan #####", formatVal(req.Plan.Raw)))
 
   diags := req.State.Get(ctx, &plan)
   diags = req.Config.Get(ctx, &plan)
@@ -300,10 +331,10 @@ func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceReques
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, map[string]any{"cmd": cmd})
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd)
+      tflog.Info(ctx, stdout, map[string]any{"cmd": cmd})
     }
 
     if err != nil {
@@ -319,8 +350,10 @@ func (r *resourceCmd) Update(ctx context.Context, req tfsdk.UpdateResourceReques
 }
 
 // Read is in charge to delete a cmd_local resource.
-func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
-  var data resourceCmdData
+func (r *cmdResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+  var data cmdResourceModel
+
+  tflog.Info(ctx, fmt.Sprintf("##### Delete:State #####\n%s\n##### /Delete:State #####", formatVal(req.State.Raw)))
 
   diags := req.State.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -347,10 +380,10 @@ func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceReques
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, map[string]any{"cmd": cmd})
     }
     if len(stdout) > 0 {
-      tflog.Info(ctx, stdout, "cmd", cmd)
+      tflog.Info(ctx, stdout, map[string]any{"cmd": cmd})
     }
 
     if err != nil {
@@ -363,11 +396,11 @@ func (r *resourceCmd) Delete(ctx context.Context, req tfsdk.DeleteResourceReques
 }
 
 // ImportState is in charge to import a cmd_local resource into terraform.
-func (r *resourceCmd) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
-  tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
+func (r *cmdResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+  //tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
 }
 
-func (data *resourceCmdData) read_state(ctx context.Context, shell shell, state_only bool) []error {
+func (data *cmdResourceModel) read_state(ctx context.Context, shell shell, state_only bool) []error {
   var errors []error
   env := make(map[string]string)
   for k, v := range data.Input {
@@ -384,7 +417,7 @@ func (data *resourceCmdData) read_state(ctx context.Context, shell shell, state_
     stdout, stderr, _, err := shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
-      tflog.Warn(ctx, stderr, "cmd", cmd)
+      tflog.Warn(ctx, stderr, map[string]any{"cmd": cmd})
     }
     if err == nil {
       if _, found := data.Input[name]; !state_only && found {
@@ -400,7 +433,7 @@ func (data *resourceCmdData) read_state(ctx context.Context, shell shell, state_
 }
 
 // get_update_cmd search for the right command to execute satisfying the update policies of the resource.
-func get_update_cmd(state map[string]types.String, plan map[string]types.String, rules resourceCmdData) string {
+func get_update_cmd(state map[string]types.String, plan map[string]types.String, rules cmdResourceModel) string {
   var modified []string
   for k, x := range state {
     if y, found := plan[k]; !found || x != y {
@@ -447,7 +480,10 @@ func (_ planModifier) MarkdownDescription(ctx context.Context) string {
 }
 
 func (_ planModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
-  var plan, state resourceCmdData
+  var plan, state cmdResourceModel
+
+  tflog.Info(ctx, fmt.Sprintf("##### PlanModify:State #####\n%s\n##### /PlanModify:State #####", formatVal(req.State.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### PlanModify:Plan #####\n%s\n##### /PlanModify:Plan #####", formatVal(req.Plan.Raw)))
 
   if req.State.Raw.IsNull() || !req.State.Raw.IsKnown() {
     return
@@ -468,6 +504,34 @@ func (_ planModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanR
   }
 }
 
+type planModifier2 struct {}
+
+func (_ planModifier2) Description(ctx context.Context) string {
+  return "Checks if the resource must be replaced depending on which inputs are plan to be modified"
+}
+
+func (_ planModifier2) MarkdownDescription(ctx context.Context) string {
+  return "Checks if the resource must be replaced depending on which inputs are plan to be modified"
+}
+
+func (_ planModifier2) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
+  tflog.Info(ctx, fmt.Sprintf("##### PlanModify2:State #####\n%s\n##### /PlanModify2:State #####", formatVal(req.State.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### PlanModify2:Plan #####\n%s\n##### /PlanModify2:Plan #####", formatVal(req.Plan.Raw)))
+
+  resp.AttributePlan = types.Map{
+    Unknown: false,
+    Null: false,
+    Elems: map[string]attr.Value{
+      "a": types.String{
+        Unknown: false,
+        Null: false,
+        Value: "",
+      },
+    },
+    ElemType: types.StringType,
+  }
+}
+
 type updateValidator struct {}
 
 func (_ updateValidator) Description(ctx context.Context) string {
@@ -477,7 +541,7 @@ func (_ updateValidator) MarkdownDescription(ctx context.Context) string {
   return "Validates the update policy"
 }
 func (_ updateValidator) Validate(ctx context.Context, req tfsdk.ValidateAttributeRequest, resp *tfsdk.ValidateAttributeResponse) {
-  var data resourceCmdData
+  var data cmdResourceModel
 
   diags := req.Config.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)

@@ -2,16 +2,26 @@ package provider
 
 import (
 	"context"
-	"fmt"
+	//"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	//"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/provider"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	//"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// provider satisfies the tfsdk.Provider interface and usually is included
+
+var (
+	_ provider.Provider = &cmdProvider{}
+)
+
+// cmdProvider satisfies the tfsdk.Provider interface and usually is included
 // with all Resource and DataSource implementations.
-type provider struct {
+type cmdProvider struct {
 	// client can contain the upstream provider SDK or HTTP client used to
 	// communicate with the upstream service. Resource and DataSource
 	// implementations can then make calls using this client.
@@ -31,13 +41,36 @@ type provider struct {
 }
 
 // providerData can be used to store data from the Terraform configuration.
-type providerData struct {
+type cmdProviderModel struct {
 	Example types.String `tfsdk:"example"`
 }
 
-func (p *provider) Configure(ctx context.Context, req tfsdk.ConfigureProviderRequest, resp *tfsdk.ConfigureProviderResponse) {
-	var data providerData
-	diags := req.Config.Get(ctx, &data)
+func New() provider.Provider {
+  return &cmdProvider{}
+}
+
+// Metadata returns the provider type name.
+func (p *cmdProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+	resp.TypeName = "cmd"
+}
+
+// GetSchema defines the provider-level schema for configuration data.
+func (p *cmdProvider) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
+  return tfsdk.Schema{
+    Attributes: map[string]tfsdk.Attribute{
+      "example": {
+        MarkdownDescription: "Example provider attribute",
+        Optional:            true,
+        Type:                types.StringType,
+      },
+    },
+  }, nil
+}
+
+// Configure prepares a HashiCups API client for data sources and resources.
+func (p *cmdProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+	var config cmdProviderModel
+	diags := req.Config.Get(ctx, &config)
 	resp.Diagnostics.Append(diags...)
 
 	if resp.Diagnostics.HasError() {
@@ -53,64 +86,16 @@ func (p *provider) Configure(ctx context.Context, req tfsdk.ConfigureProviderReq
 	p.configured = true
 }
 
-func (p *provider) GetResources(ctx context.Context) (map[string]tfsdk.ResourceType, diag.Diagnostics) {
-	return map[string]tfsdk.ResourceType{
-    "cmd_local": resourceCmdType{ shellFactory: shellLocalFactory, },
-    "cmd_ssh": resourceCmdType{ shellFactory: shellSshFactory, },
-	}, nil
-}
-
-func (p *provider) GetDataSources(ctx context.Context) (map[string]tfsdk.DataSourceType, diag.Diagnostics) {
-	return map[string]tfsdk.DataSourceType{
-		"scaffolding_example": exampleDataSourceType{},
-	}, nil
-}
-
-func (p *provider) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
-		Attributes: map[string]tfsdk.Attribute{
-			"example": {
-				MarkdownDescription: "Example provider attribute",
-				Optional:            true,
-				Type:                types.StringType,
-			},
-		},
-	}, nil
-}
-
-func New(version string) func() tfsdk.Provider {
-	return func() tfsdk.Provider {
-		return &provider{
-			version: version,
-		}
+// DataSources defines the data sources implemented in the provider.
+func (p *cmdProvider) DataSources(_ context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
 	}
 }
 
-// convertProviderType is a helper function for NewResource and NewDataSource
-// implementations to associate the concrete provider type. Alternatively,
-// this helper can be skipped and the provider type can be directly type
-// asserted (e.g. provider: in.(*provider)), however using this can prevent
-// potential panics.
-func convertProviderType(in tfsdk.Provider) (provider, diag.Diagnostics) {
-	var diags diag.Diagnostics
-
-	p, ok := in.(*provider)
-
-	if !ok {
-		diags.AddError(
-			"Unexpected Provider Instance Type",
-			fmt.Sprintf("While creating the data source or resource, an unexpected provider type (%T) was received. This is always a bug in the provider code and should be reported to the provider developers.", p),
-		)
-		return provider{}, diags
+// Resources defines the resources implemented in the provider.
+func (p *cmdProvider) Resources(_ context.Context) []func() resource.Resource {
+	return []func() resource.Resource{
+    NewCmdLocalResource,
+    NewCmdSshResource,
 	}
-
-	if p == nil {
-		diags.AddError(
-			"Unexpected Provider Instance Type",
-			"While creating the data source or resource, an unexpected empty provider instance was received. This is always a bug in the provider code and should be reported to the provider developers.",
-		)
-		return provider{}, diags
-	}
-
-	return *p, diags
 }
