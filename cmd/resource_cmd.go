@@ -98,7 +98,7 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
           "triggers": {
             MarkdownDescription: "What variable changes trigger the update",
             Optional:            true,
-            Type:                types.ListType{types.StringType},
+            Type:                types.SetType{types.StringType},
           },
           "cmd": {
             MarkdownDescription: "Command to execute",
@@ -163,21 +163,97 @@ type cmdResourceModel struct {
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]string `tfsdk:"state"`
   ConnectionOptions map[string]types.String `tfsdk:"connection"`
-  Reload []struct {
-    Name string `tfsdk:"name"`
-    Cmd string `tfsdk:"cmd"`
-  } `tfsdk:"reload"`
-  Update []struct {
-    Triggers []string `tfsdk:"triggers"`
-    Cmd string `tfsdk:"cmd"`
-  } `tfsdk:"update"`
-  Create []struct {
-    Cmd string `tfsdk:"cmd"`
-  } `tfsdk:"create"`
-  Destroy []struct {
-    Cmd string `tfsdk:"cmd"`
-  } `tfsdk:"destroy"`
+  Reload []cmdResourceReloadModel `tfsdk:"reload"`
+  Update []cmdResourceUpdateModel `tfsdk:"update"`
+  Create []cmdResourceCreateModel `tfsdk:"create"`
+  Destroy []cmdResourceDestroyModel `tfsdk:"destroy"`
 }
+
+type cmdResourceReloadModel struct {
+  Name string `tfsdk:"name"`
+  Cmd string `tfsdk:"cmd"`
+}
+type cmdResourceUpdateModel struct {
+  Triggers []string `tfsdk:"triggers"`
+  Cmd string `tfsdk:"cmd"`
+}
+type cmdResourceCreateModel struct {
+  Cmd string `tfsdk:"cmd"`
+}
+type cmdResourceDestroyModel struct {
+  Cmd string `tfsdk:"cmd"`
+}
+
+//type cmdResourceData struct {
+//  Id string
+//  Input map[string]string
+//  State map[string]string
+//  ConnectionOptions map[string]string
+//  Reload map[string]string
+//  Update []cmdResourceUpdateData
+//  CreateCmd string
+//  DestroyCmd string
+//}
+//
+//type cmdResourceUpdateData struct {
+//  Triggers []string
+//  Cmd string
+//}
+//
+//func tryString(str types.String) string {
+//  if str.IsUnknown() || str.IsNull() {
+//    return ""
+//  }
+//  return str.Value
+//}
+//
+//func (model *cmdResourceModel) toData() cmdResourceData {
+//  data := cmdResourceData{
+//    Id: "",
+//    Input: make(map[string]string),
+//    State: make(map[string]string),
+//    ConnectionOptions: make(map[string]string),
+//    Reload: make(map[string]string),
+//    Update: []cmdResourceUpdateData{},
+//    CreateCmd: "",
+//    DestroyCmd: "",
+//  }
+//
+//  if model == nil {
+//    return data
+//  }
+//
+//  data.Id = tryString(model.Id)
+//  for k, v := range model.Input {
+//    data.Input[k] = tryString(v)
+//  }
+//  for k, v := range model.State {
+//    data.State[k] = v
+//  }
+//  for k, v := range model.ConnectionOptions {
+//    data.ConnectionOptions[k] = tryString(v)
+//  }
+//  for _, reloadModel := range model.Reload {
+//    data.Reload[reloadModel.Name] = reloadModel.Cmd
+//  }
+//  for _, updateModel := range model.Update {
+//    updateData := cmdResourceUpdateData{
+//      Triggers: updateModel.Triggers,
+//      Cmd: updateModel.Cmd,
+//    }
+//    sort.Strings(updateData.Triggers)
+//    data.Update = append(data.Update, updateData)
+//  }
+//  for _, createModel := range model.Create {
+//    data.CreateCmd = createModel.Cmd
+//  }
+//  for _, destroyModel := range model.Destroy {
+//    data.DestroyCmd = destroyModel.Cmd
+//  }
+//
+//  return data
+//}
+
 
 func (r *cmdResource) init(ctx context.Context, data cmdResourceModel) error {
   if r.shell == nil {
@@ -248,8 +324,6 @@ func (r *cmdResource) Create(ctx context.Context, req resource.CreateRequest, re
   data.State = make(map[string]string)
   data.read_state(ctx, r.shell, true)
 
-  // For the purposes of this example code, hardcoding a response value to
-  // save into the Terraform state.
   data.Id = types.String{Value: generate_id()}
 
   diags = resp.State.Set(ctx, &data)
@@ -309,9 +383,10 @@ func (r *cmdResource) Update(ctx context.Context, req resource.UpdateRequest, re
     return
   }
 
-  cmd := get_update_cmd(state.Input, plan.Input, state)
+  update := get_update(state.Input, plan.Input, state)
 
-  if len(cmd) > 0 {
+  if update != nil {
+    cmd := update.Cmd
     env := make(map[string]string)
 
     for k, v := range plan.Input {
@@ -432,8 +507,8 @@ func (data *cmdResourceModel) read_state(ctx context.Context, shell shell, state
   return errors
 }
 
-// get_update_cmd search for the right command to execute satisfying the update policies of the resource.
-func get_update_cmd(state map[string]types.String, plan map[string]types.String, rules cmdResourceModel) string {
+// get_update search for the right command to execute satisfying the update policies of the resource.
+func get_update(state map[string]types.String, plan map[string]types.String, rules cmdResourceModel) *cmdResourceUpdateModel {
   var modified []string
   for k, x := range state {
     if y, found := plan[k]; !found || x != y {
@@ -448,25 +523,26 @@ func get_update_cmd(state map[string]types.String, plan map[string]types.String,
   sort.Strings(modified)
 
   var trig []string
-  cmd := ""
+  var rule *cmdResourceUpdateModel = nil
 
-  for _, update := range rules.Update {
+  for i := range rules.Update {
+    update := &rules.Update[i]
     triggers := update.Triggers
     sort.Strings(triggers)
     if len(triggers) == 0 {
-      if len(cmd) == 0 {
-        cmd = update.Cmd
+      if rule == nil {
+        rule = update
       }
     } else if len(triggers) >= len(modified) && (len(trig) == 0 || len(trig) > len(triggers)) {
       _, _, right := sorted_list_3way(triggers, modified)
       if len(right) == 0 {
         trig = triggers
-        cmd = update.Cmd
+        rule = update
       }
     }
   }
 
-  return cmd
+  return rule
 }
 
 type inputPlanModifier struct {}
@@ -498,8 +574,8 @@ func (_ inputPlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
   diags = req.State.Get(ctx, &state)
   resp.Diagnostics.Append(diags...)
 
-  cmd := get_update_cmd(state.Input, plan.Input, state)
-  if len(cmd) == 0 {
+  rule := get_update(state.Input, plan.Input, state)
+  if rule == nil {
     resp.RequiresReplace = true
   }
 }
@@ -517,6 +593,15 @@ func (_ statePlanModifier) MarkdownDescription(ctx context.Context) string {
 func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
   tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:State #####\n%s\n##### /StatePlanModify:State #####", formatVal(req.State.Raw)))
   tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:Plan #####\n%s\n##### /StatePlanModify:Plan #####", formatVal(req.Plan.Raw)))
+
+  if req.State.Raw.IsNull() || !req.State.Raw.IsKnown() {
+    return
+  }
+  if req.Plan.Raw.IsNull() || !req.Plan.Raw.IsKnown() {
+    return
+  }
+
+  tflog.Info(ctx, "##### Apply StatePlanModify #####")
 
   resp.AttributePlan = types.Map{
     Unknown: false,
