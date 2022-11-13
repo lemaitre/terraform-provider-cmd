@@ -1,4 +1,4 @@
-package provider
+package cmd
 
 import (
   "context"
@@ -68,7 +68,7 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
         Required:            true,
         MarkdownDescription: "Inputs",
         PlanModifiers: tfsdk.AttributePlanModifiers{
-          planModifier{},
+          inputPlanModifier{},
         },
         Type: types.MapType{types.StringType},
       },
@@ -76,7 +76,7 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
         Computed:            true,
         MarkdownDescription: "State",
         PlanModifiers: tfsdk.AttributePlanModifiers{
-          planModifier2{},
+          statePlanModifier{},
           //resource.UseStateForUnknown(),
         },
         Type: types.MapType{types.StringType},
@@ -469,21 +469,21 @@ func get_update_cmd(state map[string]types.String, plan map[string]types.String,
   return cmd
 }
 
-type planModifier struct {}
+type inputPlanModifier struct {}
 
-func (_ planModifier) Description(ctx context.Context) string {
+func (_ inputPlanModifier) Description(ctx context.Context) string {
   return "Checks if the resource must be replaced depending on which inputs are plan to be modified"
 }
 
-func (_ planModifier) MarkdownDescription(ctx context.Context) string {
+func (_ inputPlanModifier) MarkdownDescription(ctx context.Context) string {
   return "Checks if the resource must be replaced depending on which inputs are plan to be modified"
 }
 
-func (_ planModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
+func (_ inputPlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
   var plan, state cmdResourceModel
 
-  tflog.Info(ctx, fmt.Sprintf("##### PlanModify:State #####\n%s\n##### /PlanModify:State #####", formatVal(req.State.Raw)))
-  tflog.Info(ctx, fmt.Sprintf("##### PlanModify:Plan #####\n%s\n##### /PlanModify:Plan #####", formatVal(req.Plan.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### InputPlanModify:State #####\n%s\n##### /InputPlanModify:State #####", formatVal(req.State.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### InputPlanModify:Plan #####\n%s\n##### /InputPlanModify:Plan #####", formatVal(req.Plan.Raw)))
 
   if req.State.Raw.IsNull() || !req.State.Raw.IsKnown() {
     return
@@ -504,26 +504,26 @@ func (_ planModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanR
   }
 }
 
-type planModifier2 struct {}
+type statePlanModifier struct {}
 
-func (_ planModifier2) Description(ctx context.Context) string {
+func (_ statePlanModifier) Description(ctx context.Context) string {
   return "Checks if the resource must be replaced depending on which inputs are plan to be modified"
 }
 
-func (_ planModifier2) MarkdownDescription(ctx context.Context) string {
+func (_ statePlanModifier) MarkdownDescription(ctx context.Context) string {
   return "Checks if the resource must be replaced depending on which inputs are plan to be modified"
 }
 
-func (_ planModifier2) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
-  tflog.Info(ctx, fmt.Sprintf("##### PlanModify2:State #####\n%s\n##### /PlanModify2:State #####", formatVal(req.State.Raw)))
-  tflog.Info(ctx, fmt.Sprintf("##### PlanModify2:Plan #####\n%s\n##### /PlanModify2:Plan #####", formatVal(req.Plan.Raw)))
+func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
+  tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:State #####\n%s\n##### /StatePlanModify:State #####", formatVal(req.State.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:Plan #####\n%s\n##### /StatePlanModify:Plan #####", formatVal(req.Plan.Raw)))
 
   resp.AttributePlan = types.Map{
     Unknown: false,
     Null: false,
     Elems: map[string]attr.Value{
       "a": types.String{
-        Unknown: false,
+        Unknown: true,
         Null: false,
         Value: "",
       },
