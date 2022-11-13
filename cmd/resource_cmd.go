@@ -5,7 +5,10 @@ import (
   "strings"
   "sort"
   "fmt"
+  "regexp"
 
+  "github.com/hashicorp/terraform-plugin-framework-validators/setvalidator"
+  "github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
   "github.com/hashicorp/terraform-plugin-framework/attr"
   //"github.com/hashicorp/terraform-plugin-framework/datasource"
   "github.com/hashicorp/terraform-plugin-framework/diag"
@@ -78,7 +81,6 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
         MarkdownDescription: "State",
         PlanModifiers: tfsdk.AttributePlanModifiers{
           statePlanModifier{},
-          //resource.UseStateForUnknown(),
         },
         Type: types.MapType{types.StringType},
       },
@@ -100,11 +102,18 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
             MarkdownDescription: "What variable changes trigger the update",
             Optional:            true,
             Type:                types.SetType{types.StringType},
+            Validators: []tfsdk.AttributeValidator{
+              setvalidator.SizeAtLeast(1),
+              setvalidator.ValuesAre(stringvalidator.RegexMatches(regexp.MustCompile(`^[a-zA-Z]\w*$`), "must start with a letter and contain only letters, digits and underscore")),
+            },
           },
           "reloads": {
             MarkdownDescription: "What state variables must be reloaded",
             Optional:            true,
             Type:                types.SetType{types.StringType},
+            Validators: []tfsdk.AttributeValidator{
+              updateReloadValidator{},
+            },
           },
           "cmd": {
             MarkdownDescription: "Command to execute",
@@ -113,7 +122,7 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
           },
         },
         Validators: []tfsdk.AttributeValidator{
-          updateValidator{},
+          updateAmbiguityValidator{},
         },
       },
       "read": {
@@ -123,6 +132,10 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
             MarkdownDescription: "Variable name to reload",
             Required:            true,
             Type:                types.StringType,
+            Validators: []tfsdk.AttributeValidator{
+              stringvalidator.LengthAtLeast(1),
+              stringvalidator.RegexMatches(regexp.MustCompile(`^[a-zA-Z]\w*$`), "must start with a letter and contain only letters, digits and underscore"),
+            },
           },
           "cmd": {
             MarkdownDescription: "Command to execute",
@@ -661,26 +674,72 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
   }
 }
 
-type updateValidator struct {}
+type updateReloadValidator struct {}
 
-func (_ updateValidator) Description(ctx context.Context) string {
+func (_ updateReloadValidator) Description(ctx context.Context) string {
   return "Validates the update policy"
 }
-func (_ updateValidator) MarkdownDescription(ctx context.Context) string {
+func (_ updateReloadValidator) MarkdownDescription(ctx context.Context) string {
   return "Validates the update policy"
 }
-func (_ updateValidator) Validate(ctx context.Context, req tfsdk.ValidateAttributeRequest, resp *tfsdk.ValidateAttributeResponse) {
+func (_ updateReloadValidator) Validate(ctx context.Context, req tfsdk.ValidateAttributeRequest, resp *tfsdk.ValidateAttributeResponse) {
+  if req.AttributeConfig.IsUnknown() || req.AttributeConfig.IsNull() {
+    return
+  }
+
+  var readModel []cmdResourceReadModel
+
+  diags := req.Config.GetAttribute(ctx, path.Root("read"), &readModel)
+  resp.Diagnostics.Append(diags...)
+  if diags.HasError() {
+    return
+  }
+
+  type void struct{}
+  vars := make(map[string]void)
+
+  for _, read := range readModel {
+    vars[read.Name] = void{}
+  }
+
+  var reloads []types.String
+  diags = tfsdk.ValueAs(ctx, req.AttributeConfig, &reloads)
+
+  for _, name := range reloads {
+    if !name.IsUnknown() && !name.IsNull() {
+      if _, found := vars[name.ValueString()]; !found {
+        path := req.AttributePath.AtSetValue(name)
+        resp.Diagnostics.AddAttributeError(path, "Invalid reload specification for update block", fmt.Sprintf("%s request the reloading of the variable %s, but it does not exit (ie: there is no read block with such a name).", path, name))
+      }
+    }
+  }
+}
+
+
+type updateAmbiguityValidator struct {}
+
+func (_ updateAmbiguityValidator) Description(ctx context.Context) string {
+  return "Validates the update policy"
+}
+func (_ updateAmbiguityValidator) MarkdownDescription(ctx context.Context) string {
+  return "Validates the update policy"
+}
+func (_ updateAmbiguityValidator) Validate(ctx context.Context, req tfsdk.ValidateAttributeRequest, resp *tfsdk.ValidateAttributeResponse) {
   var data cmdResourceModel
 
   diags := req.Config.Get(ctx, &data)
   resp.Diagnostics.Append(diags...)
+
+  // `triggers` of all update blocks must be ordered for the following to work
+  for _, update := range data.Update {
+    sort.Strings(update.Triggers)
+  }
 
   type void struct {}
   seen := make(map[string]void)
   conflict := make(map[string]void)
 
   for _, update0 := range data.Update {
-    sort.Strings(update0.Triggers)
     triggers0 := strings.Join(update0.Triggers, ",")
     if _, found := seen[triggers0]; found {
       resp.Diagnostics.AddError("Update ambiguity", fmt.Sprintf("Update rule for %s is duplicated", triggers0))
@@ -688,7 +747,6 @@ func (_ updateValidator) Validate(ctx context.Context, req tfsdk.ValidateAttribu
     seen[triggers0] = void{}
 
     for _, update1 := range data.Update {
-      sort.Strings(update1.Triggers)
       left, inner, right := sorted_list_3way(update0.Triggers, update1.Triggers)
       if len(left) > 0 && len(inner) > 0 && len(right) > 0 {
         conflict[strings.Join(inner, ",")] = void{}
