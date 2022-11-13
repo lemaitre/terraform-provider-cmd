@@ -591,8 +591,11 @@ func (_ statePlanModifier) MarkdownDescription(ctx context.Context) string {
 }
 
 func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
+  var plan, state cmdResourceModel
+
   tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:State #####\n%s\n##### /StatePlanModify:State #####", formatVal(req.State.Raw)))
   tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:Plan #####\n%s\n##### /StatePlanModify:Plan #####", formatVal(req.Plan.Raw)))
+
 
   if req.State.Raw.IsNull() || !req.State.Raw.IsKnown() {
     return
@@ -603,16 +606,34 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
 
   tflog.Info(ctx, "##### Apply StatePlanModify #####")
 
+  diags := req.Config.Get(ctx, &plan)
+  resp.Diagnostics.Append(diags...)
+
+  diags = req.State.Get(ctx, &state)
+  resp.Diagnostics.Append(diags...)
+
+  type void struct{}
+  stateReload := make(map[string]string)
+  elems := make(map[string]attr.Value)
+
+  for _, reload := range state.Reload {
+    stateReload[reload.Name] = reload.Cmd
+  }
+  for _, reload := range plan.Reload {
+    name := reload.Name
+    value, valueFound := state.State[name]
+    stateCmd, cmdFound := stateReload[name]
+    if !valueFound || !cmdFound || stateCmd != reload.Cmd {
+      elems[name] = types.StringUnknown()
+    } else {
+      elems[name] = types.StringValue(value)
+    }
+  }
+
   resp.AttributePlan = types.Map{
     Unknown: false,
     Null: false,
-    Elems: map[string]attr.Value{
-      "a": types.String{
-        Unknown: true,
-        Null: false,
-        Value: "",
-      },
-    },
+    Elems: elems,
     ElemType: types.StringType,
   }
 }
