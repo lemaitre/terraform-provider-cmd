@@ -59,13 +59,20 @@ resource "cmd_ssh" "plop" {
   }
   update {
     cmd = "echo update"
+    invalidates = ["a"]
   }
   destroy {
     cmd = "echo destroy"
   }
   reload {
     name = "a"
-    cmd = "echo reload"
+    cmd = <<-EOT
+    echo -n "$INPUT_dummy"
+    EOT
+  }
+  reload {
+    name = "b"
+    cmd = "echo plop"
   }
 }
 

@@ -100,6 +100,11 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
             Optional:            true,
             Type:                types.SetType{types.StringType},
           },
+          "invalidates": {
+            MarkdownDescription: "What state varaibles are invalidated",
+            Optional:            true,
+            Type:                types.SetType{types.StringType},
+          },
           "cmd": {
             MarkdownDescription: "Command to execute",
             Required:            true,
@@ -161,7 +166,7 @@ func (r *cmdResource) Configure(_ context.Context, req resource.ConfigureRequest
 type cmdResourceModel struct {
   Id   types.String `tfsdk:"id"`
   Input map[string]types.String `tfsdk:"inputs"`
-  State map[string]string `tfsdk:"state"`
+  State map[string]types.String `tfsdk:"state"`
   ConnectionOptions map[string]types.String `tfsdk:"connection"`
   Reload []cmdResourceReloadModel `tfsdk:"reload"`
   Update []cmdResourceUpdateModel `tfsdk:"update"`
@@ -175,6 +180,7 @@ type cmdResourceReloadModel struct {
 }
 type cmdResourceUpdateModel struct {
   Triggers []string `tfsdk:"triggers"`
+  Invalidates []string `tfsdk:"invalidates"`
   Cmd string `tfsdk:"cmd"`
 }
 type cmdResourceCreateModel struct {
@@ -197,6 +203,7 @@ type cmdResourceDestroyModel struct {
 //
 //type cmdResourceUpdateData struct {
 //  Triggers []string
+//  Invalidates []string
 //  Cmd string
 //}
 //
@@ -228,7 +235,7 @@ type cmdResourceDestroyModel struct {
 //    data.Input[k] = tryString(v)
 //  }
 //  for k, v := range model.State {
-//    data.State[k] = v
+//    data.State[k] = tryString(v)
 //  }
 //  for k, v := range model.ConnectionOptions {
 //    data.ConnectionOptions[k] = tryString(v)
@@ -239,9 +246,11 @@ type cmdResourceDestroyModel struct {
 //  for _, updateModel := range model.Update {
 //    updateData := cmdResourceUpdateData{
 //      Triggers: updateModel.Triggers,
+//      Invalidates: updateModel.Invalidates,
 //      Cmd: updateModel.Cmd,
 //    }
 //    sort.Strings(updateData.Triggers)
+//    sort.Strings(updateData.Invalidates)
 //    data.Update = append(data.Update, updateData)
 //  }
 //  for _, createModel := range model.Create {
@@ -321,7 +330,7 @@ func (r *cmdResource) Create(ctx context.Context, req resource.CreateRequest, re
     }
   }
 
-  data.State = make(map[string]string)
+  data.State = make(map[string]types.String)
   data.read_state(ctx, r.shell, true)
 
   data.Id = types.String{Value: generate_id()}
@@ -371,7 +380,7 @@ func (r *cmdResource) Update(ctx context.Context, req resource.UpdateRequest, re
   plan.Id = state.Id
 
   if plan.State == nil {
-    plan.State = make(map[string]string)
+    plan.State = make(map[string]types.String)
   }
 
   if resp.Diagnostics.HasError() {
@@ -402,6 +411,13 @@ func (r *cmdResource) Update(ctx context.Context, req resource.UpdateRequest, re
         s = v.Value
       }
       env[fmt.Sprintf("PREVIOUS_%s", k)] = s
+    }
+    for k, v := range state.State {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      env[fmt.Sprintf("STATE_%s", k)] = s
     }
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
@@ -452,6 +468,13 @@ func (r *cmdResource) Delete(ctx context.Context, req resource.DeleteRequest, re
       }
       env[fmt.Sprintf("INPUT_%s", k)] = s
     }
+    for k, v := range data.State {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      env[fmt.Sprintf("STATE_%s", k)] = s
+    }
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
@@ -484,6 +507,13 @@ func (data *cmdResourceModel) read_state(ctx context.Context, shell shell, state
       s = v.Value
     }
     env[fmt.Sprintf("INPUT_%s", k)] = s
+    for k, v := range data.State {
+      var s string
+      if !v.Null {
+        s = v.Value
+      }
+      env[fmt.Sprintf("STATE_%s", k)] = s
+    }
   }
 
   for _, reload := range data.Reload {
@@ -496,9 +526,9 @@ func (data *cmdResourceModel) read_state(ctx context.Context, shell shell, state
     }
     if err == nil {
       if _, found := data.Input[name]; !state_only && found {
-        data.Input[name] = types.String{Value: stdout}
+        data.Input[name] = types.StringValue(stdout)
       }
-      data.State[name] = stdout
+      data.State[name] = types.StringValue(stdout)
     } else {
       errors = append(errors, err)
     }
@@ -602,14 +632,20 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
 
   tflog.Info(ctx, "##### Apply StatePlanModify #####")
 
-  var config cmdResourceModel
+  var config, plan cmdResourceModel
 
   diags := req.Config.Get(ctx, &config)
   resp.Diagnostics.Append(diags...)
 
-  stateData := map[string]string{}
+  // FIXME: use plan value
+  diags = req.Config.Get(ctx, &plan)
+  resp.Diagnostics.Append(diags...)
+
+  stateData := map[string]types.String{}
+  stateInputData := map[string]types.String{}
   stateReloadData := []cmdResourceReloadModel{}
   configReloadData := config.Reload
+  planInputData := plan.Input
 
   // If this is not a creation, we must read the state
   if !req.State.Raw.IsNull() && req.State.Raw.IsKnown() {
@@ -619,6 +655,7 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
     resp.Diagnostics.Append(diags...)
 
     stateData = state.State
+    stateInputData = state.Input
     stateReloadData = state.Reload
   }
 
@@ -637,7 +674,14 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
     if !valueFound || !cmdFound || stateCmd != reload.Cmd {
       elems[name] = types.StringUnknown()
     } else {
-      elems[name] = types.StringValue(value)
+      elems[name] = value
+    }
+  }
+
+  rule := get_update(stateInputData, planInputData, config)
+  if rule != nil {
+    for _, invalidate := range rule.Invalidates {
+      elems[invalidate] = types.StringUnknown()
     }
   }
 
