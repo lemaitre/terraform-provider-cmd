@@ -14,6 +14,7 @@ import (
   "github.com/hashicorp/terraform-plugin-framework/resource"
   "github.com/hashicorp/terraform-plugin-framework/tfsdk"
   "github.com/hashicorp/terraform-plugin-framework/types"
+  "github.com/hashicorp/terraform-plugin-framework/path"
   "github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -550,6 +551,9 @@ func get_update(state map[string]types.String, plan map[string]types.String, rul
       modified = append(modified, k)
     }
   }
+  if len(modified) == 0 {
+    return nil
+  }
   sort.Strings(modified)
 
   var trig []string
@@ -632,37 +636,35 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
 
   tflog.Info(ctx, "##### Apply StatePlanModify #####")
 
-  var config, plan cmdResourceModel
+  var config cmdResourceModel
 
-  diags := req.Config.Get(ctx, &config)
-  resp.Diagnostics.Append(diags...)
+  resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 
-  // FIXME: use plan value
-  diags = req.Config.Get(ctx, &plan)
-  resp.Diagnostics.Append(diags...)
-
+  configReloadData := config.Reload
   stateData := map[string]types.String{}
   stateInputData := map[string]types.String{}
   stateReloadData := []cmdResourceReloadModel{}
-  configReloadData := config.Reload
-  planInputData := plan.Input
+  planInputData := map[string]types.String{}
+
+  resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("inputs"), &planInputData)...)
+
+  //configReloadData := config.Reload
+  //planInputData := plan.Input
 
   // If this is not a creation, we must read the state
   if !req.State.Raw.IsNull() && req.State.Raw.IsKnown() {
-    var state cmdResourceModel
-
-    diags = req.State.Get(ctx, &state)
-    resp.Diagnostics.Append(diags...)
-
-    stateData = state.State
-    stateInputData = state.Input
-    stateReloadData = state.Reload
+    resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("state"), &stateData)...)
+    resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("inputs"), &stateInputData)...)
+    resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("reload"), &stateReloadData)...)
   }
 
 
   type void struct{}
   stateReload := make(map[string]string)
   elems := make(map[string]attr.Value)
+
+  rule := get_update(stateInputData, planInputData, config)
+  invalidatesAll := rule != nil && rule.Invalidates == nil
 
   for _, reload := range stateReloadData {
     stateReload[reload.Name] = reload.Cmd
@@ -671,14 +673,13 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
     name := reload.Name
     value, valueFound := stateData[name]
     stateCmd, cmdFound := stateReload[name]
-    if !valueFound || !cmdFound || stateCmd != reload.Cmd {
+    if invalidatesAll || !valueFound || !cmdFound || stateCmd != reload.Cmd {
       elems[name] = types.StringUnknown()
     } else {
       elems[name] = value
     }
   }
 
-  rule := get_update(stateInputData, planInputData, config)
   if rule != nil {
     for _, invalidate := range rule.Invalidates {
       elems[invalidate] = types.StringUnknown()
