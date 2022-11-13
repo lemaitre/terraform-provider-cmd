@@ -591,37 +591,48 @@ func (_ statePlanModifier) MarkdownDescription(ctx context.Context) string {
 }
 
 func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttributePlanRequest, resp *tfsdk.ModifyAttributePlanResponse) {
-  var plan, state cmdResourceModel
-
   tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:State #####\n%s\n##### /StatePlanModify:State #####", formatVal(req.State.Raw)))
+  tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:Config #####\n%s\n##### /StatePlanModify:Config #####", formatVal(req.Config.Raw)))
   tflog.Info(ctx, fmt.Sprintf("##### StatePlanModify:Plan #####\n%s\n##### /StatePlanModify:Plan #####", formatVal(req.Plan.Raw)))
 
-
-  if req.State.Raw.IsNull() || !req.State.Raw.IsKnown() {
-    return
-  }
+  // No modification on destroy
   if req.Plan.Raw.IsNull() || !req.Plan.Raw.IsKnown() {
     return
   }
 
   tflog.Info(ctx, "##### Apply StatePlanModify #####")
 
-  diags := req.Config.Get(ctx, &plan)
+  var config cmdResourceModel
+
+  diags := req.Config.Get(ctx, &config)
   resp.Diagnostics.Append(diags...)
 
-  diags = req.State.Get(ctx, &state)
-  resp.Diagnostics.Append(diags...)
+  stateData := map[string]string{}
+  stateReloadData := []cmdResourceReloadModel{}
+  configReloadData := config.Reload
+
+  // If this is not a creation, we must read the state
+  if !req.State.Raw.IsNull() && req.State.Raw.IsKnown() {
+    var state cmdResourceModel
+
+    diags = req.State.Get(ctx, &state)
+    resp.Diagnostics.Append(diags...)
+
+    stateData = state.State
+    stateReloadData = state.Reload
+  }
+
 
   type void struct{}
   stateReload := make(map[string]string)
   elems := make(map[string]attr.Value)
 
-  for _, reload := range state.Reload {
+  for _, reload := range stateReloadData {
     stateReload[reload.Name] = reload.Cmd
   }
-  for _, reload := range plan.Reload {
+  for _, reload := range configReloadData {
     name := reload.Name
-    value, valueFound := state.State[name]
+    value, valueFound := stateData[name]
     stateCmd, cmdFound := stateReload[name]
     if !valueFound || !cmdFound || stateCmd != reload.Cmd {
       elems[name] = types.StringUnknown()
