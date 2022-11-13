@@ -101,8 +101,8 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
             Optional:            true,
             Type:                types.SetType{types.StringType},
           },
-          "invalidates": {
-            MarkdownDescription: "What state varaibles are invalidated",
+          "reloads": {
+            MarkdownDescription: "What state variables must be reloaded",
             Optional:            true,
             Type:                types.SetType{types.StringType},
           },
@@ -116,7 +116,7 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
           updateValidator{},
         },
       },
-      "reload": {
+      "read": {
         NestingMode: tfsdk.BlockNestingModeSet,
         Attributes: map[string]tfsdk.Attribute{
           "name": {
@@ -169,19 +169,19 @@ type cmdResourceModel struct {
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]types.String `tfsdk:"state"`
   ConnectionOptions map[string]types.String `tfsdk:"connection"`
-  Reload []cmdResourceReloadModel `tfsdk:"reload"`
+  Read []cmdResourceReadModel `tfsdk:"read"`
   Update []cmdResourceUpdateModel `tfsdk:"update"`
   Create []cmdResourceCreateModel `tfsdk:"create"`
   Destroy []cmdResourceDestroyModel `tfsdk:"destroy"`
 }
 
-type cmdResourceReloadModel struct {
+type cmdResourceReadModel struct {
   Name string `tfsdk:"name"`
   Cmd string `tfsdk:"cmd"`
 }
 type cmdResourceUpdateModel struct {
   Triggers []string `tfsdk:"triggers"`
-  Invalidates []string `tfsdk:"invalidates"`
+  Reloads []string `tfsdk:"reloads"`
   Cmd string `tfsdk:"cmd"`
 }
 type cmdResourceCreateModel struct {
@@ -196,7 +196,7 @@ type cmdResourceDestroyModel struct {
 //  Input map[string]string
 //  State map[string]string
 //  ConnectionOptions map[string]string
-//  Reload map[string]string
+//  Read map[string]string
 //  Update []cmdResourceUpdateData
 //  CreateCmd string
 //  DestroyCmd string
@@ -204,7 +204,7 @@ type cmdResourceDestroyModel struct {
 //
 //type cmdResourceUpdateData struct {
 //  Triggers []string
-//  Invalidates []string
+//  Reloads []string
 //  Cmd string
 //}
 //
@@ -215,7 +215,7 @@ type cmdResourceDestroyModel struct {
 //    Input: make(map[string]string),
 //    State: make(map[string]string),
 //    ConnectionOptions: make(map[string]string),
-//    Reload: make(map[string]string),
+//    Read: make(map[string]string),
 //    Update: []cmdResourceUpdateData{},
 //    CreateCmd: "",
 //    DestroyCmd: "",
@@ -235,17 +235,17 @@ type cmdResourceDestroyModel struct {
 //  for k, v := range model.ConnectionOptions {
 //    data.ConnectionOptions[k] = tryString(v)
 //  }
-//  for _, reloadModel := range model.Reload {
-//    data.Reload[reloadModel.Name] = reloadModel.Cmd
+//  for _, reloadModel := range model.Read {
+//    data.Read[reloadModel.Name] = readModel.Cmd
 //  }
 //  for _, updateModel := range model.Update {
 //    updateData := cmdResourceUpdateData{
 //      Triggers: updateModel.Triggers,
-//      Invalidates: updateModel.Invalidates,
+//      Reloads: updateModel.Reloads,
 //      Cmd: updateModel.Cmd,
 //    }
 //    sort.Strings(updateData.Triggers)
-//    sort.Strings(updateData.Invalidates)
+//    sort.Strings(updateData.Reloads)
 //    data.Update = append(data.Update, updateData)
 //  }
 //  for _, createModel := range model.Create {
@@ -330,7 +330,7 @@ func (r *cmdResource) Create(ctx context.Context, req resource.CreateRequest, re
   data.State = make(map[string]types.String)
   data.read_state(ctx, r.shell, true)
 
-  data.Id = types.String{Value: generate_id()}
+  data.Id = types.StringValue(generate_id())
 
   diags = resp.State.Set(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -485,9 +485,9 @@ func (data *cmdResourceModel) read_state(ctx context.Context, shell shell, state
     env[fmt.Sprintf("STATE_%s", k)] = tryString(v)
   }
 
-  for _, reload := range data.Reload {
-    name := reload.Name
-    cmd := reload.Cmd
+  for _, read := range data.Read {
+    name := read.Name
+    cmd := read.Cmd
     stdout, stderr, _, err := shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
@@ -608,49 +608,48 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
 
   resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 
-  configReloadData := config.Reload
+  configReadData := config.Read
   stateData := map[string]types.String{}
   stateInputData := map[string]types.String{}
-  stateReloadData := []cmdResourceReloadModel{}
+  stateReadData := []cmdResourceReadModel{}
   planInputData := map[string]types.String{}
 
   resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("inputs"), &planInputData)...)
 
-  //configReloadData := config.Reload
-  //planInputData := plan.Input
-
-  // If this is not a creation, we must read the state
+  // If this is not a resource creation, we must read the state
   if !req.State.Raw.IsNull() && req.State.Raw.IsKnown() {
     resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("state"), &stateData)...)
     resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("inputs"), &stateInputData)...)
-    resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("reload"), &stateReloadData)...)
+    resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("read"), &stateReadData)...)
   }
 
-
-  type void struct{}
-  stateReload := make(map[string]string)
+  stateRead := make(map[string]string)
   elems := make(map[string]attr.Value)
 
   rule := config.get_update(stateInputData, planInputData)
-  invalidatesAll := rule != nil && rule.Invalidates == nil
+  reloadAll := rule != nil && rule.Reloads == nil
 
-  for _, reload := range stateReloadData {
-    stateReload[reload.Name] = reload.Cmd
+  for _, read := range stateReadData {
+    stateRead[read.Name] = read.Cmd
   }
-  for _, reload := range configReloadData {
-    name := reload.Name
-    value, valueFound := stateData[name]
-    stateCmd, cmdFound := stateReload[name]
-    if invalidatesAll || !valueFound || !cmdFound || stateCmd != reload.Cmd {
-      elems[name] = types.StringUnknown()
-    } else {
-      elems[name] = value
+  for _, read := range configReadData {
+    name := read.Name
+    elem := types.StringUnknown()
+    if !reloadAll {
+      stateCmd, cmdFound := stateRead[name]
+      if cmdFound && stateCmd == read.Cmd {
+        value, valueFound := stateData[name]
+        if valueFound {
+          elem = value
+        }
+      }
     }
+    elems[name] = elem
   }
 
   if rule != nil {
-    for _, invalidate := range rule.Invalidates {
-      elems[invalidate] = types.StringUnknown()
+    for _, reload := range rule.Reloads {
+      elems[reload] = types.StringUnknown()
     }
   }
 

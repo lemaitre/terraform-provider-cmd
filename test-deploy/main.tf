@@ -51,7 +51,7 @@ resource "cmd_ssh" "plop" {
     pouet = null_resource.dummy.id
   }
   inputs = {
-    dummy = md5("b")
+    dummy = md5("a")
   }
 
   create {
@@ -59,18 +59,18 @@ resource "cmd_ssh" "plop" {
   }
   update {
     cmd = "echo update"
-    invalidates = ["a"]
+    reloads = ["a"]
   }
   destroy {
     cmd = "echo destroy"
   }
-  reload {
+  read {
     name = "a"
     cmd = <<-EOT
     echo -n "$INPUT_dummy"
     EOT
   }
-  reload {
+  read {
     name = "b"
     cmd = "echo plop"
   }
