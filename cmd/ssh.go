@@ -1,18 +1,173 @@
 package cmd
 
 import (
-  "strconv"
+  "context"
   "fmt"
-  "encoding/json"
   "encoding/pem"
   "crypto/x509"
   "io/ioutil"
 
 	"golang.org/x/crypto/ssh"
+
+  "github.com/hashicorp/terraform-plugin-framework/diag"
+  "github.com/hashicorp/terraform-plugin-framework/tfsdk"
+  "github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 type shellSsh struct {
   client *ssh.Client
+}
+
+var shellSshFactory shellFactory = shellFactory{
+  IsRemote: true,
+  Name: "ssh",
+  Schema: map[string]tfsdk.Attribute{
+    "hostname": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Hostname used for the ssh connection",
+      Required: true,
+    },
+    "port": tfsdk.Attribute{
+      Type: types.NumberType,
+      Description: "Port used for the ssh connection (default: 22)",
+      Optional: true,
+    },
+    "protocol": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Protocol used for the ssh connection (default: \"tcp\")",
+      Optional: true,
+    },
+    "username": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Username used for the ssh connection (default: \"root\")",
+      Optional: true,
+    },
+    "password": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Password used for the ssh connection",
+      Optional: true,
+      Sensitive: true,
+    },
+    "key": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "ssh key",
+      Optional: true,
+      Sensitive: true,
+    },
+    "keyfile": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Path to the ssh key",
+      Optional: true,
+    },
+    "keypassword": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Password used to decrypt the ssh key",
+      Optional: true,
+      Sensitive: true,
+    },
+  },
+  Create: func (ctx context.Context, val types.Object) (shell, diag.Diagnostics) {
+    if sshCache.clients == nil {
+      sshCache.clients = make(map[string]*ssh.Client)
+    }
+    cacheKey := val.String()
+    if client, ok := sshCache.clients[cacheKey]; ok {
+      return &shellSsh{
+        client: client,
+      }, nil
+    }
+
+    type connectionModel struct {
+      Hostname    string `tfsdk:"hostname"`
+      Port        int    `tfsdk:"port"`
+      Protocol    string `tfsdk:"protocol"`
+      Username    string `tfsdk:"username"`
+      Password    string `tfsdk:"password"`
+      Key         string `tfsdk:"key"`
+      Keyfile     string `tfsdk:"keyfile"`
+      Keypassword string `tfsdk:"keypassword"`
+    }
+
+    var connection connectionModel
+    diags := val.As(ctx, &connection, types.ObjectAsOptions{true, true})
+
+    if len(diags) > 0 {
+      return nil, diags
+    }
+
+    if connection.Hostname == "" {
+      return nil, diag.Diagnostics{
+        diag.NewErrorDiagnostic(
+          "Missing Hostname",
+          "The hostname for the ssh connection is missing",
+        ),
+      }
+    }
+    if connection.Port == 0 {
+      connection.Port = 22
+    }
+    if connection.Username == "" {
+      connection.Username = "root"
+    }
+    if connection.Protocol == "" {
+      connection.Protocol = "tcp"
+    }
+
+    var err error
+    var sh shellSsh
+
+    config := ssh.ClientConfig{
+      User: connection.Username,
+      Auth: []ssh.AuthMethod {},
+      HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+    }
+    if connection.Password != "" {
+      config.Auth = append(config.Auth, ssh.Password(connection.Password))
+    }
+
+    var key []byte
+    if connection.Keyfile != "" {
+      key, err = ioutil.ReadFile(connection.Keyfile)
+      if err != nil {
+        return nil, diag.Diagnostics{
+          diag.NewErrorDiagnostic(
+            "Error while reading keyfile",
+            fmt.Sprintf("%s", err),
+          ),
+        }
+      }
+    }
+    if connection.Key != "" {
+      key = []byte(connection.Key)
+    }
+
+    if key != nil {
+      signer, err := signerFromPem(key, connection.Keypassword)
+      if err != nil {
+        return nil, diag.Diagnostics{
+          diag.NewErrorDiagnostic(
+            "Error while parsing key",
+            fmt.Sprintf("%s", err),
+          ),
+        }
+      }
+      config.Auth = append(config.Auth, ssh.PublicKeys(signer))
+    }
+
+    sh.client, err = ssh.Dial(connection.Protocol, fmt.Sprintf("%s:%d", connection.Hostname, connection.Port), &config)
+    if err != nil {
+      return nil, diag.Diagnostics{
+        diag.NewErrorDiagnostic(
+          "Error during the ssh connection",
+          fmt.Sprintf("%s", err),
+        ),
+      }
+    }
+
+    sshCache.clients[cacheKey] = sh.client
+
+    return &sh, nil
+  },
 }
 
 func (sh *shellSsh) Execute(command string, env map[string]string) (string, string, string, error) {
@@ -129,86 +284,4 @@ func parsePemBlock(block *pem.Block) (interface{}, error) {
   default:
     return nil, fmt.Errorf("Parsing private key failed, unsupported key type %q", block.Type)
   }
-}
-
-func shellSshFactory(options map[string]string) (shell, error) {
-  if sshCache.clients == nil {
-    sshCache.clients = make(map[string]*ssh.Client)
-  }
-  js, _ := json.Marshal(options)
-  cacheKey := string(js)
-  if client, ok := sshCache.clients[cacheKey]; ok {
-    return &shellSsh{
-      client: client,
-    }, nil
-  }
-
-
-  var err error
-  var sh shellSsh
-
-  var hostname string
-  protocol := "tcp"
-  port := 22
-
-  config := ssh.ClientConfig{
-    User: "root",
-    Auth: []ssh.AuthMethod {},
-    HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-  }
-
-  if hostname_, ok := options["hostname"]; ok {
-    hostname = hostname_
-  } else {
-    return nil, fmt.Errorf("Missing hostname")
-  }
-
-  if port_, ok := options["port"]; ok {
-    port, err = strconv.Atoi(port_)
-    if err != nil {
-      return nil, fmt.Errorf("\"%s\" is not a valid port number", port_)
-    }
-  }
-
-  if protocol_, ok := options["protocol"]; ok {
-    protocol = protocol_
-  }
-  if user, ok := options["username"]; ok {
-    config.User = user
-  }
-  if password, ok := options["password"]; ok {
-    config.Auth = append(config.Auth, ssh.Password(password))
-  }
-
-  var key []byte
-  if keyfile, ok := options["keyfile"]; ok {
-    key, err = ioutil.ReadFile(keyfile)
-    if err != nil {
-      return nil, err
-    }
-  }
-  if key_, ok := options["key"]; ok {
-    key = []byte(key_)
-  }
-
-  if key != nil {
-    keypassword := ""
-    if password, ok := options["keypassword"]; ok {
-      keypassword = password
-    }
-    signer, err := signerFromPem(key, keypassword)
-    if err != nil {
-      return nil, err
-    }
-    config.Auth = append(config.Auth, ssh.PublicKeys(signer))
-  }
-
-  sh.client, err = ssh.Dial(protocol, fmt.Sprintf("%s:%d", hostname, port), &config)
-  if err != nil {
-    return nil, err
-  }
-
-  sshCache.clients[cacheKey] = sh.client
-
-  return &sh, nil
 }

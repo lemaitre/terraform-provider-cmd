@@ -31,33 +31,16 @@ var (
 // cmdResource is a resource handle to a cmd_local resource.
 type cmdResource struct {
   shell shell
-  shellType string
-  shellFactory func(map[string]string) (shell, error)
-}
-
-func NewCmdLocalResource() resource.Resource {
-  return &cmdResource{
-    shell: nil,
-    shellType: "local",
-    shellFactory: shellLocalFactory,
-  }
-}
-
-func NewCmdSshResource() resource.Resource {
-  return &cmdResource{
-    shell: nil,
-    shellType: "ssh",
-    shellFactory: shellSshFactory,
-  }
+  shellFactory shellFactory
 }
 
 // Metadata returns the data source type name.
 func (r *cmdResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-  resp.TypeName = req.ProviderTypeName + "_" + r.shellType
+  resp.TypeName = req.ProviderTypeName + "_" + r.shellFactory.Name
 }
 
 // GetSchema returns the Terraform Schema of the cmd_local resource.
-func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
+func (r *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
   return tfsdk.Schema{
     Description: "Custom resource managed by local shell scripts",
     MarkdownDescription: "Custom resource managed by local shell scripts",
@@ -66,7 +49,7 @@ func (t *cmdResource) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
       "connection": {
         Optional:            true,
         MarkdownDescription: "Connection Options",
-        Type: types.MapType{types.StringType},
+        Attributes: tfsdk.SingleNestedAttributes(r.shellFactory.Schema),
       },
       "inputs": {
         Required:            true,
@@ -181,7 +164,7 @@ type cmdResourceModel struct {
   Id   types.String `tfsdk:"id"`
   Input map[string]types.String `tfsdk:"inputs"`
   State map[string]types.String `tfsdk:"state"`
-  ConnectionOptions map[string]types.String `tfsdk:"connection"`
+  ConnectionOptions types.Object `tfsdk:"connection"`
   Read []cmdResourceReadModel `tfsdk:"read"`
   Update []cmdResourceUpdateModel `tfsdk:"update"`
   Create []cmdResourceCreateModel `tfsdk:"create"`
@@ -278,19 +261,12 @@ func tryString(str types.String) string {
   return str.Value
 }
 
-func (r *cmdResource) init(ctx context.Context, data cmdResourceModel) error {
+func (r *cmdResource) init(ctx context.Context, data cmdResourceModel) diag.Diagnostics {
+  var diags diag.Diagnostics
   if r.shell == nil {
-    options := make(map[string]string)
-    for k, v := range data.ConnectionOptions {
-      if v.Null {
-        return fmt.Errorf("%s is not known or null", k)
-      }
-      options[k] = v.Value
-    }
-    var err error
-    r.shell, err = r.shellFactory(options)
-    if err != nil {
-      return err
+    r.shell, diags = r.shellFactory.Create(ctx, data.ConnectionOptions)
+    if len(diags) > 0 {
+      return diags
     }
   }
   return nil
@@ -314,8 +290,9 @@ func (r *cmdResource) Create(ctx context.Context, req resource.CreateRequest, re
     return
   }
 
-  if err := r.init(ctx, data); err != nil {
-    resp.Diagnostics.AddError("Connection Error", err.Error())
+
+  if d := r.init(ctx, data); len(d) > 0 {
+    resp.Diagnostics.Append(d...)
     return
   }
 
@@ -362,8 +339,8 @@ func (r *cmdResource) Read(ctx context.Context, req resource.ReadRequest, resp *
     return
   }
 
-  if err := r.init(ctx, data); err != nil {
-    resp.Diagnostics.AddError("Connection Error", err.Error())
+  if d := r.init(ctx, data); len(d) > 0 {
+    resp.Diagnostics.Append(d...)
     return
   }
 
@@ -397,8 +374,8 @@ func (r *cmdResource) Update(ctx context.Context, req resource.UpdateRequest, re
     return
   }
 
-  if err := r.init(ctx, plan); err != nil {
-    resp.Diagnostics.AddError("Connection Error", err.Error())
+  if d := r.init(ctx, plan); len(d) > 0 {
+    resp.Diagnostics.Append(d...)
     return
   }
 
@@ -451,8 +428,8 @@ func (r *cmdResource) Delete(ctx context.Context, req resource.DeleteRequest, re
     return
   }
 
-  if err := r.init(ctx, data); err != nil {
-    resp.Diagnostics.AddError("Connection Error", err.Error())
+  if d := r.init(ctx, data); len(d) > 0 {
+    resp.Diagnostics.Append(d...)
     return
   }
 

@@ -1,8 +1,13 @@
 package cmd
 
 import (
+  "context"
   "fmt"
   "os/exec"
+
+  "github.com/hashicorp/terraform-plugin-framework/diag"
+  "github.com/hashicorp/terraform-plugin-framework/tfsdk"
+  "github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 type shell interface {
@@ -10,6 +15,28 @@ type shell interface {
   //Send(string, []byte) error
   //Receive(string) ([]byte, error)
   Close()
+}
+
+type shellFactory struct {
+  IsRemote bool
+  Name string
+  Schema map[string]tfsdk.Attribute
+  Create func(context.Context, types.Object) (shell, diag.Diagnostics)
+}
+
+var shellLocalFactory shellFactory = shellFactory{
+  IsRemote: false,
+  Name: "local",
+  Schema: map[string]tfsdk.Attribute{
+    "unused": tfsdk.Attribute{
+      Type: types.StringType,
+      Description: "Unused",
+      Optional: true,
+    },
+  },
+  Create: func (_ context.Context, _ types.Object) (shell, diag.Diagnostics) {
+    return shellLocal{}, nil
+  },
 }
 
 type shellLocal struct {
@@ -39,7 +66,3 @@ func (sh shellLocal) Execute(command string, env map[string]string) (string, str
   return out.Stdout.String(), out.Stderr.String(), out.Combined.String(), err
 }
 func (_ shellLocal) Close() {}
-
-func shellLocalFactory(map[string]string) (shell, error) {
-  return shellLocal{}, nil
-}

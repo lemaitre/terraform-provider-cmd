@@ -72,10 +72,13 @@ resource "cmd_ssh" "plop" {
   }
   read {
     name = "b"
-    cmd = "echo plop"
+    cmd = "echo pouet"
   }
 }
 
 output "plop" {
-  value = cmd_ssh.plop
+  value = {
+    inputs = cmd_ssh.plop.inputs,
+    state  = cmd_ssh.plop.state,
+  }
 }

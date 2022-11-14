@@ -95,7 +95,17 @@ func (p *cmdProvider) DataSources(_ context.Context) []func() datasource.DataSou
 // Resources defines the resources implemented in the provider.
 func (p *cmdProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-    NewCmdLocalResource,
-    NewCmdSshResource,
+    func() resource.Resource {
+      return &cmdResource{
+        shell: nil,
+        shellFactory: shellLocalFactory,
+      }
+    },
+    func() resource.Resource {
+      return &cmdResource{
+        shell: nil,
+        shellFactory: shellSshFactory,
+      }
+    },
 	}
 }
