@@ -318,7 +318,7 @@ func (r *resourceCommand) Create(ctx context.Context, req resource.CreateRequest
   }
 
   data.State = make(map[string]types.String)
-  data.read_state(ctx, r.shell, true)
+  data.readState(ctx, r.shell, nil, true)
 
   data.Id = types.StringValue(generate_id())
 
@@ -344,7 +344,7 @@ func (r *resourceCommand) Read(ctx context.Context, req resource.ReadRequest, re
     return
   }
 
-  data.read_state(ctx, r.shell, true)
+  data.readState(ctx, r.shell, nil, true)
 
   diags = resp.State.Set(ctx, &data)
   resp.Diagnostics.Append(diags...)
@@ -358,17 +358,10 @@ func (r *resourceCommand) Update(ctx context.Context, req resource.UpdateRequest
   tflog.Info(ctx, fmt.Sprintf("##### Update:State #####\n%s\n##### /Update:State #####", formatVal(req.State.Raw)))
   tflog.Info(ctx, fmt.Sprintf("##### Update:Plan #####\n%s\n##### /Update:Plan #####", formatVal(req.Plan.Raw)))
 
-  diags := req.State.Get(ctx, &plan)
-  diags = req.Config.Get(ctx, &plan)
-  //resp.Diagnostics.Append(diags...)
-  diags = req.State.Get(ctx, &state)
-  //resp.Diagnostics.Append(diags...)
+  resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+  resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 
   plan.Id = state.Id
-
-  if plan.State == nil {
-    plan.State = make(map[string]types.String)
-  }
 
   if resp.Diagnostics.HasError() {
     return
@@ -379,7 +372,7 @@ func (r *resourceCommand) Update(ctx context.Context, req resource.UpdateRequest
     return
   }
 
-  update := state.get_update(state.Input, plan.Input)
+  update := plan.get_update(state.Input, plan.Input)
 
   if update != nil {
     cmd := update.Cmd
@@ -409,10 +402,17 @@ func (r *resourceCommand) Update(ctx context.Context, req resource.UpdateRequest
     }
   }
 
-  plan.read_state(ctx, r.shell, true)
+  var reloads []string
+  for name, value := range plan.State {
+    if value.IsUnknown() {
+      reloads = append(reloads, name)
+    }
+  }
+  plan.readState(ctx, r.shell, reloads, true)
 
-  diags = resp.State.Set(ctx, &plan)
-  resp.Diagnostics.Append(diags...)
+
+  resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+  tflog.Info(ctx, fmt.Sprintf("##### Update:Output #####\n%s\n##### /Update:Output #####", formatVal(resp.State.Raw)))
 }
 
 // Read is in charge to delete a cmd_local resource.
@@ -465,8 +465,20 @@ func (r *resourceCommand) ImportState(ctx context.Context, req resource.ImportSt
   //tfsdk.ResourceImportStatePassthroughID(ctx, tftypes.NewAttributePath().WithAttributeName("id"), req, resp)
 }
 
-func (data *resourceCommandModel) read_state(ctx context.Context, shell shell, state_only bool) []error {
+func (data *resourceCommandModel) readState(ctx context.Context, shell shell, variables []string, state_only bool) []error {
   var errors []error
+
+  type void struct{}
+  varShouldBeRead := make(map[string]void)
+  if variables == nil {
+    for _, read := range data.Read {
+      varShouldBeRead[read.Name] = void{}
+    }
+  } else {
+    for _, v := range variables {
+      varShouldBeRead[v] = void{}
+    }
+  }
   env := make(map[string]string)
   for k, v := range data.Input {
     env[fmt.Sprintf("INPUT_%s", k)] = tryString(v)
@@ -478,6 +490,10 @@ func (data *resourceCommandModel) read_state(ctx context.Context, shell shell, s
   for _, read := range data.Read {
     name := read.Name
     cmd := read.Cmd
+
+    if _, found := varShouldBeRead[name]; !found {
+      continue
+    }
     stdout, stderr, _, err := shell.Execute(cmd, env)
 
     if len(stderr) > 0 {
