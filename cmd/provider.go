@@ -16,12 +16,12 @@ import (
 
 
 var (
-	_ provider.Provider = &cmdProvider{}
+	_ provider.Provider = &providerCmd{}
 )
 
-// cmdProvider satisfies the tfsdk.Provider interface and usually is included
+// providerCmd satisfies the tfsdk.Provider interface and usually is included
 // with all Resource and DataSource implementations.
-type cmdProvider struct {
+type providerCmd struct {
 	// client can contain the upstream provider SDK or HTTP client used to
 	// communicate with the upstream service. Resource and DataSource
 	// implementations can then make calls using this client.
@@ -41,21 +41,21 @@ type cmdProvider struct {
 }
 
 // providerData can be used to store data from the Terraform configuration.
-type cmdProviderModel struct {
+type providerCmdModel struct {
 	Example types.String `tfsdk:"example"`
 }
 
 func New() provider.Provider {
-  return &cmdProvider{}
+  return &providerCmd{}
 }
 
 // Metadata returns the provider type name.
-func (p *cmdProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
+func (p *providerCmd) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "cmd"
 }
 
 // GetSchema defines the provider-level schema for configuration data.
-func (p *cmdProvider) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
+func (p *providerCmd) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
   return tfsdk.Schema{
     Attributes: map[string]tfsdk.Attribute{
       "example": {
@@ -68,8 +68,8 @@ func (p *cmdProvider) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
 }
 
 // Configure prepares a HashiCups API client for data sources and resources.
-func (p *cmdProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-	var config cmdProviderModel
+func (p *providerCmd) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+	var config providerCmdModel
 	diags := req.Config.Get(ctx, &config)
 	resp.Diagnostics.Append(diags...)
 
@@ -87,22 +87,22 @@ func (p *cmdProvider) Configure(ctx context.Context, req provider.ConfigureReque
 }
 
 // DataSources defines the data sources implemented in the provider.
-func (p *cmdProvider) DataSources(_ context.Context) []func() datasource.DataSource {
+func (p *providerCmd) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 	}
 }
 
 // Resources defines the resources implemented in the provider.
-func (p *cmdProvider) Resources(_ context.Context) []func() resource.Resource {
+func (p *providerCmd) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
     func() resource.Resource {
-      return &cmdResource{
+      return &resourceCommand{
         shell: nil,
         shellFactory: shellLocalFactory,
       }
     },
     func() resource.Resource {
-      return &cmdResource{
+      return &resourceCommand{
         shell: nil,
         shellFactory: shellSshFactory,
       }
