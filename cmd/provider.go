@@ -67,6 +67,11 @@ func (p *providerCmd) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnos
   }, nil
 }
 
+var shellFactories []shellFactory = []shellFactory{
+  shellLocalFactory,
+  shellSshFactory,
+}
+
 // Configure prepares a HashiCups API client for data sources and resources.
 func (p *providerCmd) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var config providerCmdModel
@@ -94,18 +99,12 @@ func (p *providerCmd) DataSources(_ context.Context) []func() datasource.DataSou
 
 // Resources defines the resources implemented in the provider.
 func (p *providerCmd) Resources(_ context.Context) []func() resource.Resource {
-	return []func() resource.Resource{
-    func() resource.Resource {
+  return transform(shellFactories, func(factory shellFactory) func() resource.Resource {
+    return func() resource.Resource {
       return &resourceCommand{
         shell: nil,
-        shellFactory: shellLocalFactory,
+        shellFactory: factory,
       }
-    },
-    func() resource.Resource {
-      return &resourceCommand{
-        shell: nil,
-        shellFactory: shellSshFactory,
-      }
-    },
-	}
+    }
+  })
 }

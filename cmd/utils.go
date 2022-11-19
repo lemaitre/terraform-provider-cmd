@@ -45,3 +45,12 @@ func generate_id() string {
   rand.Read(bytes[:])
   return base64.StdEncoding.EncodeToString(bytes[:])
 }
+
+func transform[F ~func(U) V, U any, V any](arr []U, f F) []V {
+  r := make([]V, 0, len(arr))
+  for _, x := range arr {
+    y := f(x)
+    r = append(r, y)
+  }
+  return r
+}
