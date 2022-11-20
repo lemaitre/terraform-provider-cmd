@@ -652,12 +652,9 @@ func (_ statePlanModifier) Modify(ctx context.Context, req tfsdk.ModifyAttribute
     }
   }
 
-  resp.AttributePlan = types.Map{
-    Unknown: false,
-    Null: false,
-    Elems: elems,
-    ElemType: types.StringType,
-  }
+  m, diags := types.MapValue(types.StringType, elems)
+  resp.Diagnostics.Append(diags...)
+  resp.AttributePlan = m
 }
 
 type updateReloadValidator struct {}
