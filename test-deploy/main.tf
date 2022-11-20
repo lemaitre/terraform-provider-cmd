@@ -11,6 +11,26 @@ terraform {
 resource "null_resource" "dummy" {
 }
 
+data "cmd_ssh" "pouet" {
+  connection = {
+    hostname = "bender.csdt.fr"
+    username = "dummy-user"
+    keyfile = "dummy.rsa"
+    pouet = null_resource.dummy.id
+  }
+
+  inputs = {
+  }
+
+  read {
+    name = "a"
+    cmd = <<-EOT
+    echo -n "Pouet"
+    EOT
+  }
+
+}
+
 #resource "cmd_local" "pouet" {
 #  inputs = {
 #    a = 3
@@ -51,7 +71,7 @@ resource "cmd_ssh" "plop" {
     pouet = null_resource.dummy.id
   }
   inputs = {
-    dummy = md5("a")
+    dummy = md5("f")
   }
 
   create {
@@ -59,7 +79,7 @@ resource "cmd_ssh" "plop" {
   }
   update {
     cmd = "echo update"
-    reloads = ["a"]
+    reloads = ["a", "b"]
   }
   destroy {
     cmd = "echo destroy"
@@ -76,6 +96,12 @@ resource "cmd_ssh" "plop" {
   }
 }
 
+output "pouet" {
+  value = {
+    inputs = data.cmd_ssh.pouet.inputs,
+    state  = data.cmd_ssh.pouet.state,
+  }
+}
 output "plop" {
   value = {
     inputs = cmd_ssh.plop.inputs,

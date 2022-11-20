@@ -93,8 +93,14 @@ func (p *providerCmd) Configure(ctx context.Context, req provider.ConfigureReque
 
 // DataSources defines the data sources implemented in the provider.
 func (p *providerCmd) DataSources(_ context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{
-	}
+  return transform(shellFactories, func(factory shellFactory) func() datasource.DataSource {
+    return func() datasource.DataSource {
+      return &dataSourceCommand{
+        shell: nil,
+        shellFactory: factory,
+      }
+    }
+  })
 }
 
 // Resources defines the resources implemented in the provider.
