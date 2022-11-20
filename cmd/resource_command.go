@@ -221,15 +221,15 @@ type resourceCommandDestroyModel struct {
 //    return data
 //  }
 //
-//  data.Id = tryString(model.Id)
+//  data.Id = model.Id.ValueString()
 //  for k, v := range model.Input {
-//    data.Input[k] = tryString(v)
+//    data.Input[k] = v.ValueString()
 //  }
 //  for k, v := range model.State {
-//    data.State[k] = tryString(v)
+//    data.State[k] = v.ValueString()
 //  }
 //  for k, v := range model.ConnectionOptions {
-//    data.ConnectionOptions[k] = tryString(v)
+//    data.ConnectionOptions[k] = v.ValueString()
 //  }
 //  for _, reloadModel := range model.Read {
 //    data.Read[reloadModel.Name] = readModel.Cmd
@@ -253,13 +253,6 @@ type resourceCommandDestroyModel struct {
 //
 //  return data
 //}
-
-func tryString(str types.String) string {
-  if str.IsUnknown() || str.IsNull() {
-    return ""
-  }
-  return str.Value
-}
 
 func (r *resourceCommand) init(ctx context.Context, data resourceCommandModel) diag.Diagnostics {
   var diags diag.Diagnostics
@@ -300,7 +293,7 @@ func (r *resourceCommand) Create(ctx context.Context, req resource.CreateRequest
     cmd := create.Cmd
     env := make(map[string]string)
     for k, v := range data.Input {
-      env[fmt.Sprintf("INPUT_%s", k)] = tryString(v)
+      env[fmt.Sprintf("INPUT_%s", k)] = v.ValueString()
     }
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
@@ -379,13 +372,13 @@ func (r *resourceCommand) Update(ctx context.Context, req resource.UpdateRequest
     env := make(map[string]string)
 
     for k, v := range plan.Input {
-      env[fmt.Sprintf("INPUT_%s", k)] = tryString(v)
+      env[fmt.Sprintf("INPUT_%s", k)] = v.ValueString()
     }
     for k, v := range state.Input {
-      env[fmt.Sprintf("PREVIOUS_%s", k)] = tryString(v)
+      env[fmt.Sprintf("PREVIOUS_%s", k)] = v.ValueString()
     }
     for k, v := range state.State {
-      env[fmt.Sprintf("STATE_%s", k)] = tryString(v)
+      env[fmt.Sprintf("STATE_%s", k)] = v.ValueString()
     }
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
@@ -437,10 +430,10 @@ func (r *resourceCommand) Delete(ctx context.Context, req resource.DeleteRequest
     cmd := destroy.Cmd
     env := make(map[string]string)
     for k, v := range data.Input {
-      env[fmt.Sprintf("INPUT_%s", k)] = tryString(v)
+      env[fmt.Sprintf("INPUT_%s", k)] = v.ValueString()
     }
     for k, v := range data.State {
-      env[fmt.Sprintf("STATE_%s", k)] = tryString(v)
+      env[fmt.Sprintf("STATE_%s", k)] = v.ValueString()
     }
     stdout, stderr, combined, err := r.shell.Execute(cmd, env)
 
@@ -481,10 +474,10 @@ func (data *resourceCommandModel) readState(ctx context.Context, shell shell, va
   }
   env := make(map[string]string)
   for k, v := range data.Input {
-    env[fmt.Sprintf("INPUT_%s", k)] = tryString(v)
+    env[fmt.Sprintf("INPUT_%s", k)] = v.ValueString()
   }
   for k, v := range data.State {
-    env[fmt.Sprintf("STATE_%s", k)] = tryString(v)
+    env[fmt.Sprintf("STATE_%s", k)] = v.ValueString()
   }
 
   for _, read := range data.Read {
